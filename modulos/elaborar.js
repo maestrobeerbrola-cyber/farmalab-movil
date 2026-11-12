@@ -23,6 +23,7 @@ function pendingItems(p) {
   if (!p.lot) miss.push('número de lote');
   if (!str(p.form)) miss.push('forma farmacéutica');
   if (!(p.pnt_refs || []).length && !str(p.method_notes)) miss.push('modus operandi (PNT o descripción)');
+  if (!str(p.staff_pharmacists ?? p.operator)) miss.push('farmacéutico elaborador');
   if (!(p.equipment || []).length) miss.push('utillaje utilizado');
   if (!((p.qc && p.qc.tests) || []).some((t) => str(t.result))) miss.push('resultados del control de calidad');
   if (!str(p.qc && p.qc.by)) miss.push('personal del control de calidad');
@@ -174,6 +175,7 @@ async function viewProduction(id) {
   ${stale >= STALE_PRODUCTION_DAYS ? `<p class="msg warn">En proceso desde hace ${stale} días sin cambiar de estado.</p>` : ''}
   ${missing.length && p.status !== 'en_proceso' ? `<div class="msg warn"><strong>Faltan datos para completar la guía:</strong> ${esc(missing.join(', '))}.</div>` : ''}
   ${['elaborada', 'dispensada'].includes(p.status) && p.lot ? `<p><a class="btn block secondary" href="#etiqueta--${esc(p.uuid)}">${ICON.tag}Generar etiqueta en PDF</a></p>` : ''}
+  ${['elaborada', 'dispensada', 'rechazada'].includes(p.status) && p.lot ? `<p><a class="btn block secondary" href="#ficha--${esc(p.uuid)}">${ICON.doc}Ficha de registro en PDF (RD 175/2001)</a></p>` : ''}
   ${!tasado && p.status !== 'rechazada' ? `<p><a class="btn block secondary" href="#valoracion--elab--${esc(p.uuid)}">${ICON.calc}${p.valuation ? 'Revisar el precio de valoración' : 'Calcular el precio de valoración'}</a></p>` : ''}
   ${p.status === 'elaborada' && !p.lot ? `<p class="msg warn">Esta elaboración se registró con una versión anterior y no tiene lote. <button class="btn small" data-act="assignLot" data-id="${esc(p.uuid)}">Asignar lote</button></p>` : ''}`;
 
@@ -216,6 +218,10 @@ async function viewProduction(id) {
       ${pnts.length ? `<ul class="list">${pnts.map((r) => `<li><a class="row" href="#pnt--${esc(r.uuid)}"><div class="row-main"><strong><span class="code">${esc(r.code)}</span> ${esc(r.title)}</strong><span class="sub"><span>Versión ${esc(r.version)}</span></span></div></a></li>`).join('')}</ul>` : '<p class="hint">La fórmula no tiene PNT vinculado: describe el procedimiento abajo.</p>'}
       ${field('Descripción o incidencias del procedimiento', `<textarea name="method_notes" maxlength="4000">${esc(p.method_notes || '')}</textarea>`)}
     </section>
+    <section><h2>Personal elaborador</h2><div class="panel form">
+      ${field('Farmacéutico/s', text('staff_pharmacists', `value="${esc(p.staff_pharmacists ?? p.operator ?? '')}" maxlength="200"`))}
+      ${field('Auxiliares (nombre y apellidos)', text('staff_assistants', `value="${esc(p.staff_assistants || '')}" maxlength="200"`), 'Separados por comas. Aparecen en la ficha de registro.')}
+    </div></section>
     <section><h2>Utillaje utilizado</h2><div class="panel checks">
       ${equipment.map((e) => checkbox('equipment', esc(e), (p.equipment || []).includes(e), `value="${esc(e)}"`)).join('')}
       ${field('Otro utillaje', text('equipment_other', 'maxlength="200" placeholder="Separado por comas"'))}
@@ -325,6 +331,10 @@ function readGuide(form, rec) {
     });
   }
   rec.method_notes = str(el.method_notes.value).slice(0, 4000);
+  if (el.staff_pharmacists) {
+    rec.staff_pharmacists = str(el.staff_pharmacists.value).slice(0, 200);
+    rec.staff_assistants = str(el.staff_assistants.value).slice(0, 200);
+  }
   rec.equipment = [...all.getAll('equipment'), ...str(el.equipment_other.value).split(',').map((x) => x.trim()).filter(Boolean)].map((x) => x.slice(0, 120));
   const tests = all.getAll('qc_test'); const results = all.getAll('qc_result'); const oks = all.getAll('qc_ok');
   rec.qc = {

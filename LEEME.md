@@ -1,4 +1,4 @@
-# FARMA·LAB móvil v0.3 (prototipo)
+# FARMA·LAB móvil v0.3.2 (prototipo)
 
 App para Android que se instala desde Chrome y funciona sin conexión. Todos los datos se guardan **en el propio teléfono**.
 
@@ -6,12 +6,19 @@ App para Android que se instala desde Chrome y funciona sin conexión. Todos los
 - **Almacén.** Materias primas con número de control interno, proveedor, lote, boletín de análisis y ficha de seguridad adjuntos, detección de excipientes de declaración obligatoria y cambio de estado (cuarentena, aceptado, rechazado, bloqueado). Material de acondicionamiento (envases) con su ficha y su stock.
 - **Fórmulas.** Varios componentes, códigos nacionales por presentación o concentración, PNT vinculados y estados borrador, aprobada y obsoleta.
 - **Elaborar.** Guía de elaboración (RD 175/2001): pesadas con lote, envases usados, utillaje, control de calidad y decisión del farmacéutico. Estados en proceso, elaborada y dispensada. Lote `[Año]-J-[Mes]-FM-[Número]` consecutivo, que nunca se reinicia. Número de libro recetario al dispensar.
+- **Ficha de registro de formulación magistral** (RD 175/2001, ficha 2) en PDF A4, con todos los datos de la guía, lista para imprimir y firmar.
 - **Etiquetas en PDF** en folio A4 (8 o 2 por folio). Paciente, prescriptor y nº de colegiado se escriben solo al imprimir y no se guardan.
 - **Avisos en la app**: stock bajo, envases por reponer, caducidades, cuarentena, elaboraciones paradas más de 2 días y datos que faltan.
 - **Calculadora**: cantidad a pesar (% m/m, m/v, v/v, mg/g, mg/ml, ppm, 1:X, mg por unidad) con riqueza, factor sal/base y densidad; conversión de unidades y diluciones.
 - **Precio de las fórmulas financiadas** (Comunidad de Madrid), ver abajo.
 - **Documentos**: PNT y bibliografía con su PDF o Word, que se consultan dentro de la app, también sin conexión.
 - Registro de actividad, bloqueo con PIN, exportar e importar copias.
+
+## Novedades de la v0.3.2
+- **Ficha de registro en PDF.** En una elaboración elaborada, dispensada o rechazada, «Ficha de registro en PDF» genera la ficha 2 del RD 175/2001 en A4, con diseño actualizado: identificación y lote, composición, modus operandi (PNT), utillaje, materias primas con nº de control, lote, proveedor y cantidades teórica y pesada, acondicionamiento, personal elaborador, control de calidad, dispensación, observaciones, conformidad y recuadro de firma.
+- Si a la guía le faltan datos, se genera como **borrador** y se indica qué falta. Si aún no está dispensada, los datos de dispensación salen en blanco para escribirlos a mano.
+- El prescriptor y el paciente se pueden escribir al generarla, pero no se guardan.
+- La guía de elaboración tiene un apartado nuevo, **Personal elaborador** (farmacéutico/s y auxiliares).
 
 ## Novedades de la v0.3
 - Almacén con materias primas y acondicionamiento, alertas de stock y caducidad, y enlaces de búsqueda en la AEMPS.

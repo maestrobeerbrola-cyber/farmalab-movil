@@ -6,7 +6,7 @@
  * sincronizarlo más adelante con la versión de PC.
  */
 
-const APP_VERSION = '0.3.1';
+const APP_VERSION = '0.3.2';
 const PREVIEW = document.documentElement.dataset.preview === '1'; // copia de prueba publicada en Claude
 const DB_NAME = 'farmalab-movil';
 const EXPORT_FORMAT = 'farmalab-datos';
@@ -69,6 +69,7 @@ const ACTION_LABELS = {
   asignar_lote: 'Lote asignado',
   consumo_stock: 'Consumo de stock',
   etiqueta_generada: 'Etiqueta generada',
+  ficha_generada: 'Ficha de registro generada',
   valoracion_precio: 'Precio de valoración guardado',
   ajustes: 'Ajustes modificados',
   cambio_pin: 'Cambio de PIN',
@@ -85,6 +86,7 @@ const SECTIONS = {
   formulas: { title: 'Fórmulas', tab: 2 },
   elaboraciones: { title: 'Elaboraciones', tab: 3 },
   etiqueta: { title: 'Etiqueta', tab: 3 },
+  ficha: { title: 'Ficha de registro', tab: 3 },
   pnt: { title: 'PNT', tab: 4 },
   biblio: { title: 'Bibliografía', tab: 4 },
   documento: { title: 'Documento', tab: 4 },

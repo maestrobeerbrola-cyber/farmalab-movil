@@ -1,10 +1,10 @@
 /* FARMA·LAB móvil — service worker: guarda la app para usarla sin conexión.
    Al publicar una versión nueva, cambia VERSION (y APP_VERSION en app.js). */
-const VERSION = '0.3.1';
+const VERSION = '0.3.2';
 const CACHE = `farmalab-movil-${VERSION}`;
 // Imprescindibles: si falta alguno, no se instala esta versión.
 const CORE = ['./', './index.html', './app.js', './styles.css', './manifest.webmanifest',
-  './modulos/documentos.js', './modulos/almacen.js', './modulos/formulas.js', './modulos/elaborar.js', './modulos/calculadora.js', './modulos/precios.js',
+  './modulos/documentos.js', './modulos/almacen.js', './modulos/formulas.js', './modulos/elaborar.js', './modulos/calculadora.js', './modulos/precios.js', './modulos/ficha.js',
   './datos/tabla1-principios-activos.json', './datos/precio-tasado-2026.json'];
 // Complementos: si alguno falla, la app funciona igual y se guardará cuando se use.
 const EXTRA = [
