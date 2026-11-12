@@ -190,6 +190,7 @@ function actRow(a = {}) {
     <button type="button" class="icon-btn quiet" data-act="removeRow" aria-label="Quitar">${ICON.x}</button>
     <input type="text" name="act_value" inputmode="decimal" autocomplete="off" placeholder="Cantidad total" aria-label="Cantidad de principio activo" value="${esc(inputNum(a.value))}">
     <select name="act_unit" aria-label="Unidad">${options(Object.keys(ACT_UNITS), a.unit || 'g', ACT_UNITS)}</select>
+    <label class="eurg"><span>Precio</span><input type="text" name="act_eurg" inputmode="decimal" autocomplete="off" aria-label="Precio del principio activo en euros por gramo" value="${esc(inputNum(a.eurg))}"><span>€/g</span></label>
     <p class="act-info" data-actinfo aria-live="polite"></p>
   </div>`;
 }
@@ -253,7 +254,7 @@ async function viewValuation(src, id) {
     <section><h2>Principios activos (Tabla I)</h2><div class="panel form">
       <div data-rows="act">${acts.map((a) => actRow(a)).join('')}</div>
       <button type="button" class="btn secondary small" data-act="addRow" data-kind="act">${ICON.plus}Añadir principio activo</button>
-      <p class="hint">Cantidad de cada principio activo en toda la fórmula. En % se calcula sobre el total; en mg/ud. se multiplica por las unidades.</p>
+      <p class="hint">Cantidad de cada principio activo en toda la fórmula. En % se calcula sobre el total; en mg/ud. se multiplica por las unidades. Precio: si lo dejas vacío se usa el de la Tabla I; si el principio activo no está en ella, escribe su precio de coste en €/g.</p>
     </div>
     <datalist id="dl-tabla1">${data.tabla1.map((it) => `<option value="${esc(it.nombre)}">${esc(`${eurG(it.eur_g)}${it.comentario ? ` · ${it.comentario.slice(0, 70)}` : ''}`)}</option>`).join('')}</datalist>
     </section>
@@ -295,7 +296,7 @@ function readPriceInputs(box) {
     qty: n(el('qty')),
     vol: n(el('vol')),
     actives: $$('[data-rows="act"] [data-comp]', box).map((row) => ({
-      row, name: str($('[name="act_name"]', row).value), value: n($('[name="act_value"]', row)), unit: $('[name="act_unit"]', row).value,
+      row, name: str($('[name="act_name"]', row).value), value: n($('[name="act_value"]', row)), unit: $('[name="act_unit"]', row).value, eurg: n($('[name="act_eurg"]', row)),
     })),
     excipient: el('excipient').value,
     exc_qty: n(el('exc_qty')),
@@ -314,7 +315,7 @@ function valuate(inp, data, pricing) {
   const total = fee.kind === 'g' ? (qtyOk ? q : null) : (isNum(inp.vol) && inp.vol > 0 ? inp.vol : (inp.form === 'colirios' ? 10 : null));
 
   // a) principios activos
-  const acts = inp.actives.filter((a) => a.name || a.value !== null).map((a) => {
+  const acts = inp.actives.filter((a) => a.name || a.value !== null || a.eurg !== null).map((a) => {
     const m = a.name ? matchActive(a.name, data.tabla1) : { item: null, candidates: [] };
     let grams = null; let note = '';
     if (!isNum(a.value) || a.value <= 0) note = 'Indica la cantidad.';
@@ -326,13 +327,21 @@ function valuate(inp, data, pricing) {
       if (fee.kind === 'u' && qtyOk) grams = (a.value / (a.unit === 'mg_ud' ? 1000 : 1e6)) * q;
       else note = fee.kind === 'u' ? 'Indica las unidades.' : 'mg/ud. solo sirve para formas por unidades.';
     }
-    const cost = m.item && grams !== null ? m.item.eur_g * grams : null;
-    return { ...a, item: m.item, candidates: m.candidates, grams, cost, note };
+    // Precio en €/g: el que se escriba en la fila; si se deja vacío, el de la Tabla I.
+    const manual = isNum(a.eurg) && a.eurg > 0;
+    const price = manual ? a.eurg : m.item ? m.item.eur_g : null;
+    let priceNote = '';
+    if (a.eurg !== null && !manual) priceNote = 'El precio en €/g no es válido.';
+    else if (!price && a.name) priceNote = 'Escribe su precio de coste en €/g.';
+    const cost = price !== null && grams !== null ? price * grams : null;
+    return { ...a, item: m.item, candidates: m.candidates, grams, price, manual, cost, note: [note, priceNote].filter(Boolean).join(' ') };
   });
   const named = acts.filter((a) => a.name);
   if (!named.length) warn.push('Sin principios activos: una fórmula solo con excipientes no es facturable (punto 3.6 del Anexo 3).');
   const outside = named.filter((a) => !a.item);
-  if (outside.length) warn.push(`${outside.map((a) => a.name).join(', ')}: no ${outside.length === 1 ? 'figura' : 'figuran'} en la Tabla I. La fórmula solo es facturable con autorización previa del Servicio Madrileño de Salud (punto 2).`);
+  if (outside.length) warn.push(`${outside.map((a) => a.name).join(', ')}: no ${outside.length === 1 ? 'figura' : 'figuran'} en la Tabla I. Se valora con el precio de coste que escribas; la fórmula solo es facturable al Servicio Madrileño de Salud con su autorización previa (punto 2).`);
+  const changed = named.filter((a) => a.item && a.manual && Math.abs(a.eurg - a.item.eur_g) > 1e-9);
+  if (changed.length) warn.push(`${changed.map((a) => `${a.item.nombre}: usas ${eurG(a.eurg)} en lugar de los ${eurG(a.item.eur_g)} de la Tabla I`).join('; ')}. En las recetas financiadas se aplica el precio de la Tabla I.`);
   if (named.length > 1) {
     const mono = named.filter((a) => a.item && /monof|sin asociar/.test(fold(a.item.comentario)) && !/asociad/.test(fold(a.item.comentario)));
     if (mono.length) warn.push(`${mono.map((a) => a.item.nombre).join(', ')}: la Tabla I lo admite solo como monofármaco.`);
@@ -381,8 +390,8 @@ function valuate(inp, data, pricing) {
   const subtotal = round2(a + b + c + d);
   const iva = round2((subtotal * pricing.iva) / 100);
   const totalPrice = round2(subtotal + iva);
-  const aDetail = named.length ? acts.filter((x) => x.cost !== null).map((x) => `${x.item.nombre.split(/[=(]/)[0].trim()} ${eur4(x.cost)}`).join(' + ') || 'Falta la cantidad' : 'Sin principios activos';
-  if (actsPending) warn.push('Hay principios activos sin precio calculado: revisa el nombre y la cantidad.');
+  const aDetail = named.length ? acts.filter((x) => x.cost !== null).map((x) => `${(x.item ? x.item.nombre : x.name).split(/[=(]/)[0].trim()} ${eur4(x.cost)}`).join(' + ') || 'Falta la cantidad o el precio' : 'Sin principios activos';
+  if (actsPending) warn.push('Hay principios activos sin precio calculado: revisa la cantidad y el precio en €/g.');
   const text = [
     `Precio principios activos: ${money(a)}`, `Precio de excipientes: ${money(b)}`, `Honorarios profesionales: ${money(c)}`, `Envase: ${money(d)}`,
     `Subtotal: ${money(subtotal)}`, `IVA: ${fmtNum(pricing.iva)} %`, `Total: ${money(totalPrice)}`,
@@ -404,15 +413,17 @@ function setHtml(el, html) {
 function renderActInfo(x) {
   const info = $('[data-actinfo]', x.row);
   if (!info) return;
-  if (!x.name && x.value === null) { setHtml(info, ''); return; }
+  const eurInput = $('[name="act_eurg"]', x.row);
+  if (eurInput) eurInput.placeholder = x.item ? `Tabla I: ${fmtNum(x.item.eur_g)}` : 'Obligatorio';
+  if (!x.name && x.value === null && x.eurg === null) { setHtml(info, ''); return; }
   const parts = [];
   if (x.item) {
-    parts.push(`<span class="act-match">${esc(x.item.nombre)}</span> · ${esc(eurG(x.item.eur_g))}${x.item.via ? ` · ${esc(VIA_LABELS[x.item.via] || x.item.via)}` : ''}`);
-    if (x.cost !== null) parts.push(`${esc(massTextShort(x.grams))} → <strong>${esc(eur4(x.cost))}</strong>`);
+    parts.push(`<span class="act-match">${esc(x.item.nombre)}</span> · Tabla I: ${esc(eurG(x.item.eur_g))}${x.item.via ? ` · ${esc(VIA_LABELS[x.item.via] || x.item.via)}` : ''}`);
   } else if (x.name) {
     parts.push('<span class="bad">No figura en la Tabla I.</span>');
     if (x.candidates.length) parts.push(`¿Es ${x.candidates.map((c) => `<button type="button" class="linkbtn" data-act="pickActive" data-name="${esc(c.nombre)}">${esc(c.nombre)}</button>`).join(' o ')}?`);
   }
+  if (x.cost !== null) parts.push(`${esc(massTextShort(x.grams))} × ${esc(eurG(x.price))}${x.manual ? ' (precio escrito)' : ''} → <strong>${esc(eur4(x.cost))}</strong>`);
   if (x.note) parts.push(`<span class="warn-ink">${esc(x.note)}</span>`);
   if (x.item && x.item.comentario) parts.push(`<span class="act-cond">${esc(x.item.comentario)}</span>`);
   setHtml(info, parts.join('<br>'));
@@ -458,7 +469,7 @@ async function recalcPrice(box) {
     ...r,
     inputs: {
       form: inp.form, qty: inp.qty, vol: isNum(inp.vol) ? inp.vol : null,
-      actives: inp.actives.filter((a) => a.name || isNum(a.value)).map((a) => ({ name: a.name.slice(0, 160), value: isNum(a.value) ? a.value : null, unit: ACT_UNITS[a.unit] ? a.unit : 'g' })),
+      actives: inp.actives.filter((a) => a.name || isNum(a.value)).map((a) => ({ name: a.name.slice(0, 160), value: isNum(a.value) ? a.value : null, unit: ACT_UNITS[a.unit] ? a.unit : 'g', eurg: isNum(a.eurg) && a.eurg > 0 ? a.eurg : null })),
       excipient: EXCIPIENTS[inp.excipient] ? inp.excipient : '', exc_qty: isNum(inp.exc_qty) ? inp.exc_qty : null,
       container: CONTAINERS[inp.container] ? inp.container : '', containers: isNum(inp.containers) ? inp.containers : null,
     },

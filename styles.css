@@ -381,3 +381,5 @@ main { overflow-x: hidden; }
 .msg.stack-tight p + p { margin-top: 6px; }
 .price-out + .msg { margin-top: 12px; }
 p.intro { margin: 0 4px 12px; }
+.actrow .eurg { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; font-size: 15px; color: var(--muted); }
+.actrow .eurg input { flex: 1; min-width: 0; }

@@ -21,6 +21,7 @@ App para Android que se instala desde Chrome y funciona sin conexión. Todos los
 - **Valoración de fórmulas** (icono de la calculadora → pestañas *Valoración* y *Precio tasado*):
   - **Precio tasado**: las 187 fórmulas con código nacional propio y PVP fijo (listado de enero de 2026), con buscador por nombre o CN. También los preparados oficinales con precio fijo (alcohol boricado y sulfato de cobre).
   - **Valoración** según el Anexo 3 del Convenio 2023-2027: principios activos (Tabla I, 428 en €/g), excipiente (Tabla II, por 100 ml/g o fracción o por unidad), honorarios (Tabla III, con el factor P) y envase (Tabla IV), más IVA. Da el desglose «a, b, c, d, Subtotal X, IVA e, Total Y» para la receta en papel y se puede copiar.
+  - Cada principio activo tiene su precio en €/g: si se deja vacío se usa el de la Tabla I; si no está en ella, se escribe su precio de coste (v0.3.1). Si cambias el de la Tabla I, avisa de que en las recetas financiadas se aplica el de la tabla.
   - Avisa si un principio activo no está en la Tabla I, si se pasa del máximo dispensable o si la Tabla I lo admite solo como monofármaco.
   - Desde una elaboración, «Calcular el precio de valoración» rellena la forma, la cantidad y los principios activos, y el resultado se guarda en la elaboración. Si su CN tiene precio tasado, la ficha muestra el PVP y no pide valorarla.
   - El factor P (3,65 € en 2026) y el IVA (4 %) se cambian en Ajustes. Cada concepto se redondea a céntimos. Es una valoración orientativa: compruébala antes de facturar.
