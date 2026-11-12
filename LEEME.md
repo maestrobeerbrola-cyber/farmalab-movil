@@ -1,4 +1,4 @@
-# FARMA·LAB móvil v0.3.2 (prototipo)
+# FARMA·LAB móvil v0.3.3 (prototipo)
 
 App para Android que se instala desde Chrome y funciona sin conexión. Todos los datos se guardan **en el propio teléfono**.
 
@@ -6,13 +6,19 @@ App para Android que se instala desde Chrome y funciona sin conexión. Todos los
 - **Almacén.** Materias primas con número de control interno, proveedor, lote, boletín de análisis y ficha de seguridad adjuntos, detección de excipientes de declaración obligatoria y cambio de estado (cuarentena, aceptado, rechazado, bloqueado). Material de acondicionamiento (envases) con su ficha y su stock.
 - **Fórmulas.** Varios componentes, códigos nacionales por presentación o concentración, PNT vinculados y estados borrador, aprobada y obsoleta.
 - **Elaborar.** Guía de elaboración (RD 175/2001): pesadas con lote, envases usados, utillaje, control de calidad y decisión del farmacéutico. Estados en proceso, elaborada y dispensada. Lote `[Año]-J-[Mes]-FM-[Número]` consecutivo, que nunca se reinicia. Número de libro recetario al dispensar.
-- **Ficha de registro de formulación magistral** (RD 175/2001, ficha 2) en PDF A4, con todos los datos de la guía, lista para imprimir y firmar.
+- **Fichas del RD 175/2001 en PDF A4**, listas para imprimir y firmar: ficha 1 (control de calidad de cada lote de materia prima) y ficha 2 (registro de formulación magistral).
 - **Etiquetas en PDF** en folio A4 (8 o 2 por folio). Paciente, prescriptor y nº de colegiado se escriben solo al imprimir y no se guardan.
 - **Avisos en la app**: stock bajo, envases por reponer, caducidades, cuarentena, elaboraciones paradas más de 2 días y datos que faltan.
 - **Calculadora**: cantidad a pesar (% m/m, m/v, v/v, mg/g, mg/ml, ppm, 1:X, mg por unidad) con riqueza, factor sal/base y densidad; conversión de unidades y diluciones.
 - **Precio de las fórmulas financiadas** (Comunidad de Madrid), ver abajo.
 - **Documentos**: PNT y bibliografía con su PDF o Word, que se consultan dentro de la app, también sin conexión.
 - Registro de actividad, bloqueo con PIN, exportar e importar copias.
+
+## Novedades de la v0.3.3
+- **Control de calidad de materias primas.** Cada lote tiene un apartado de control de calidad: ensayos con su técnica o método, resultado y conformidad, quién lo hizo, fecha, descripción de los métodos analíticos y fecha de repetición del control, si procede. Los ensayos por defecto se cambian en Ajustes.
+- **Ficha 1 en PDF.** Desde la ficha del lote, «Ficha de control de calidad en PDF» genera la ficha 1 del RD 175/2001 en A4: identificación (nº de control interno, nombre, lote, proveedor, cantidad, fechas), controles efectuados, boletín de análisis archivado, métodos, datos complementarios, conformidad y firma. Si faltan datos sale como borrador.
+- Al aceptar un lote, la app avisa si no hay resultados del control de calidad o si algún ensayo no es conforme.
+- En las fichas solo aparecen las pruebas realizadas (con resultado).
 
 ## Novedades de la v0.3.2
 - **Ficha de registro en PDF.** En una elaboración elaborada, dispensada o rechazada, «Ficha de registro en PDF» genera la ficha 2 del RD 175/2001 en A4, con diseño actualizado: identificación y lote, composición, modus operandi (PNT), utillaje, materias primas con nº de control, lote, proveedor y cantidades teórica y pesada, acondicionamiento, personal elaborador, control de calidad, dispensación, observaciones, conformidad y recuadro de firma.

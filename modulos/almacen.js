@@ -87,8 +87,10 @@ async function viewMaterial(id) {
     ['Precauciones', val(m.handling)],
     ['Toxicidad y peligrosidad', val(m.toxicity)],
   ])}${m.observations ? `<p class="pre spaced">${esc(m.observations)}</p>` : ''}</div></section>
+  ${await materialQcSection(m)}
   <section><h2>Decisión de aceptación o rechazo</h2>${statusButtons('material', m)}
-    <p class="hint">Al aceptar o rechazar, la decisión queda fechada y firmada con tu nombre en la ficha y en el registro de actividad.</p></section>
+    <p class="hint">Al aceptar o rechazar, la decisión queda fechada y firmada con tu nombre en la ficha y en el registro de actividad.</p>
+    <p><a class="btn block secondary" href="#fichamp--${esc(m.uuid)}">${ICON.doc}Ficha de control de calidad en PDF (RD 175/2001)</a></p></section>
   <section><h2>Regularizar stock</h2>${stockAdjustForm('material', m)}</section>
   ${group && group.low ? `<p class="msg error">Stock bajo de ${esc(m.name)}: quedan ${fmtNum(group.total)} ${esc(group.unit)} y el mínimo es ${fmtNum(group.min)} ${esc(group.unit)}.</p>` : ''}
   ${await docsSection('material', m.uuid, ['boletin', 'fds', 'especificaciones', 'otro'], 'Boletín de análisis, ficha de seguridad y otros documentos')}
@@ -101,6 +103,36 @@ async function viewMaterial(id) {
     <p class="hint">Se abren en el navegador; necesitan conexión.</p>
   </div></section>
   ${used.length ? `<section><h2>Usado en</h2><ul class="list">${used.map((p) => `<li><a class="row" href="#elaboraciones--${esc(p.uuid)}"><div class="row-main"><strong>${esc(p.lot || p.record_code)}</strong><span class="sub"><span>${esc(p.formula_name)}</span></span></div>${pill('production', p.status)}</a></li>`).join('')}</ul></section>` : ''}`;
+}
+
+/** Ensayos de control de calidad de un lote (RD 175/2001, apartado 3.2.3 y ficha 1). */
+function mpQcRow(t = {}) {
+  return `<div class="mpqcrow" data-comp>
+    <input type="text" name="mq_test" aria-label="Ensayo" placeholder="Ensayo" maxlength="120" value="${esc(t.test || '')}">
+    <button type="button" class="icon-btn quiet" data-act="removeRow" aria-label="Quitar">${ICON.x}</button>
+    <input type="text" name="mq_method" aria-label="Técnica o método" placeholder="Técnica o método" maxlength="160" value="${esc(t.method || '')}">
+    <input type="text" name="mq_result" aria-label="Resultado" placeholder="Resultado" maxlength="160" value="${esc(t.result || '')}">
+    <select name="mq_ok" aria-label="Conforme">${options(['', 'si', 'no'], t.ok === true ? 'si' : t.ok === false ? 'no' : '', { '': 'Conforme', si: 'Conforme: sí', no: 'Conforme: no' })}</select>
+  </div>`;
+}
+ROW_BUILDERS.mpqc = mpQcRow;
+
+async function materialQcSection(m) {
+  const s = await loadSettings();
+  const qc = m.qc || {};
+  const tests = qc.tests && qc.tests.length ? qc.tests : (s.mp_qc_tests || []).map((t) => ({ test: t }));
+  return `<section><h2>Control de calidad</h2><form class="panel form" data-form="materialQc" data-id="${esc(m.uuid)}" novalidate>
+    ${formMsg()}
+    <div data-rows="mpqc">${(tests.length ? tests : [{}]).map((t) => mpQcRow(t)).join('')}</div>
+    <button type="button" class="btn secondary small" data-act="addRow" data-kind="mpqc">${ICON.plus}Añadir ensayo</button>
+    <div class="grid2">
+      ${field('Realizado por', text('qc_by', `value="${esc(qc.by ?? state.profile.name ?? '')}" maxlength="120"`))}
+      ${field('Fecha del control', dateInput('qc_date', qc.date))}
+    </div>
+    ${field('Descripción de los métodos analíticos', `<textarea name="qc_methods" maxlength="3000">${esc(qc.methods || '')}</textarea>`, 'Por ejemplo: según la monografía de la RFE, o comprobación del boletín de análisis del proveedor.')}
+    ${field('Fecha de repetición del control analítico', dateInput('retest_date', m.retest_date), 'Solo si procede (en lugar de la caducidad).')}
+    <button class="btn secondary block" type="submit">Guardar control de calidad</button>
+  </form></section>`;
 }
 
 function viewMaterialFormHtml(m) {
@@ -212,6 +244,25 @@ Object.assign(FORMS, {
     location.hash = `#materias--${rec.uuid}`;
   },
 
+  async materialQc(form) {
+    const m = await getOne('material', form.dataset.id);
+    if (!m) throw new InputError('Esta ficha ya no existe.');
+    const all = new FormData(form);
+    const tests = all.getAll('mq_test'); const methods = all.getAll('mq_method'); const results = all.getAll('mq_result'); const oks = all.getAll('mq_ok');
+    m.qc = {
+      tests: tests.map((t, i) => ({ test: str(t).slice(0, 120), method: str(methods[i]).slice(0, 160), result: str(results[i]).slice(0, 160), ok: oks[i] === 'si' ? true : oks[i] === 'no' ? false : null }))
+        .filter((t) => t.test || t.result || t.method),
+      by: str(all.get('qc_by')).slice(0, 120),
+      date: isDay(all.get('qc_date')) ? all.get('qc_date') : null,
+      methods: str(all.get('qc_methods')).slice(0, 3000),
+    };
+    m.retest_date = isDay(all.get('retest_date')) ? all.get('retest_date') : null;
+    if (m.qc.tests.some((t) => t.result && t.ok === null)) throw new InputError('Indica si cada ensayo con resultado es conforme o no.');
+    await save('material', m, 'control_calidad_materia_prima', `${m.name} / ${m.lot}: ${m.qc.tests.filter((t) => t.result).length} ensayos`);
+    toast('Control de calidad guardado.');
+    await route();
+  },
+
   async stockAdjust(form) {
     const { store, id } = form.dataset;
     if (!['material', 'packaging'].includes(store)) return;
@@ -239,6 +290,8 @@ STATUS_CHECKS.material = async (m, status) => {
   if (!m.internal_no) missing.push('el nº de registro interno');
   const hasBulletin = (await docsOf(m.uuid)).some((f) => f.kind === 'boletin');
   if (!m.qc_no && !hasBulletin) missing.push('el nº de control de calidad o el boletín de análisis');
+  if (!((m.qc && m.qc.tests) || []).some((t) => t.result)) missing.push('los resultados del control de calidad');
+  if (((m.qc && m.qc.tests) || []).some((t) => t.ok === false)) missing.push('que todos los ensayos sean conformes (hay alguno no conforme)');
   if (isDay(m.expiry) && daysUntil(m.expiry) < 0) missing.push('una caducidad vigente (el lote está caducado)');
   return {
     title: 'Aceptar materia prima',

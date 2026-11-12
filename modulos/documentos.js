@@ -123,15 +123,16 @@ function loadPdfJs() {
 
 async function renderPdf(container, doc) {
   const pdfjs = await loadPdfJs();
-  const pdf = await pdfjs.getDocument({
+  const task = pdfjs.getDocument({
     data: new Uint8Array(await doc.blob.arrayBuffer()),
     standardFontDataUrl: vendorUrl('pdfjs/standard_fonts/'),
     wasmUrl: vendorUrl('pdfjs/wasm/'),
     iccUrl: vendorUrl('pdfjs/iccs/'),
     isEvalSupported: false,
     enableXfa: false,
-  }).promise;
-  if (!container.isConnected) { pdf.destroy(); return; }
+  });
+  const pdf = await task.promise;
+  if (!container.isConnected) { task.destroy().catch(() => {}); return; }   // se salió de la pantalla mientras cargaba
   container.innerHTML = `<p class="hint pages">${pdf.numPages} ${pdf.numPages === 1 ? 'página' : 'páginas'}. Pellizca para ampliar.</p>`;
   const width = container.clientWidth || 360;
   const dpr = Math.min(window.devicePixelRatio || 1, 3);

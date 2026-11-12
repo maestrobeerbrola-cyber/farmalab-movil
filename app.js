@@ -6,7 +6,7 @@
  * sincronizarlo más adelante con la versión de PC.
  */
 
-const APP_VERSION = '0.3.2';
+const APP_VERSION = '0.3.3';
 const PREVIEW = document.documentElement.dataset.preview === '1'; // copia de prueba publicada en Claude
 const DB_NAME = 'farmalab-movil';
 const EXPORT_FORMAT = 'farmalab-datos';
@@ -70,6 +70,8 @@ const ACTION_LABELS = {
   consumo_stock: 'Consumo de stock',
   etiqueta_generada: 'Etiqueta generada',
   ficha_generada: 'Ficha de registro generada',
+  ficha_mp_generada: 'Ficha de control de materia prima generada',
+  control_calidad_materia_prima: 'Control de calidad de materia prima',
   valoracion_precio: 'Precio de valoración guardado',
   ajustes: 'Ajustes modificados',
   cambio_pin: 'Cambio de PIN',
@@ -87,6 +89,7 @@ const SECTIONS = {
   elaboraciones: { title: 'Elaboraciones', tab: 3 },
   etiqueta: { title: 'Etiqueta', tab: 3 },
   ficha: { title: 'Ficha de registro', tab: 3 },
+  fichamp: { title: 'Ficha de control', tab: 1 },
   pnt: { title: 'PNT', tab: 4 },
   biblio: { title: 'Bibliografía', tab: 4 },
   documento: { title: 'Documento', tab: 4 },
@@ -102,11 +105,13 @@ const DEFAULT_EQUIPMENT = [
   'Espátulas', 'Termómetro', 'Vasos de precipitados', 'Vidrio de reloj', 'Placa calefactora', 'pH-metro', 'Tamices',
 ];
 const DEFAULT_QC_TESTS = ['Caracteres organolépticos (aspecto, color, olor)', 'Peso o volumen final', 'Homogeneidad', 'pH'];
+const DEFAULT_MP_QC_TESTS = ['Caracteres organolépticos (aspecto, color, olor)', 'Identificación', 'Solubilidad', 'Comprobación del boletín de análisis del proveedor'];
 const DEFAULT_SETTINGS = {
   pharmacy: { name: '', address: '', phone: '', pharmacist: '' },
   lot: { letter: 'J', next: 1 },
   equipment: DEFAULT_EQUIPMENT,
   qc_tests: DEFAULT_QC_TESTS,
+  mp_qc_tests: DEFAULT_MP_QC_TESTS,
   label: { layout: '8', all_components: false },
   pricing: { p_factor: 3.65, iva: 4 },     // factor P 2026 (Anexo 3 del Convenio con la Comunidad de Madrid) e IVA de medicamentos
   updated_at: '',
@@ -589,10 +594,18 @@ ROUTES[''] = () => viewHome();
 ROUTES.ajustes = () => viewSettings();
 ROUTES.auditoria = () => viewAudit();
 
-async function route() {
+/**
+ * Las pantallas se preparan de una en una: si se navega mientras otra aún carga, la anterior
+ * no se pinta encima de la nueva (las pantallas con varias consultas tardan más que las sencillas).
+ */
+let routeChain = Promise.resolve();
+function route() {
+  const run = routeChain.then(renderRoute);
+  routeChain = run.catch(() => {});
+  return run;
+}
+async function renderRoute() {
   if (!state.unlocked || !$('#view')) return;
-  state.objectUrls.forEach((u) => URL.revokeObjectURL(u));
-  state.objectUrls = [];
   const hash = location.hash || '#inicio';
   const parts = hash.slice(1).split('--');
   if (parts[0] === 'inicio') parts[0] = '';
@@ -607,6 +620,9 @@ async function route() {
     console.error(err);
     html = `<div class="msg error">No se pudo mostrar esta pantalla: ${esc(err.message)}</div>`;
   }
+  if ((location.hash || '#inicio') !== hash || !state.unlocked) return;   // ya se ha pedido otra pantalla: se pintará esa
+  state.objectUrls.forEach((u) => URL.revokeObjectURL(u));
+  state.objectUrls = [];
   $('#view').innerHTML = html;
   $('#title').textContent = info.title;
   const sub = Boolean(arg) || ['ajustes', 'auditoria', 'calculadora', 'valoracion', 'etiqueta'].includes(sec);
@@ -776,6 +792,7 @@ async function viewSettings() {
     <section><h2>Utillaje y controles habituales</h2><div class="panel form">
       ${field('Utillaje del laboratorio', `<textarea name="equipment" rows="6">${esc(s.equipment.join('\n'))}</textarea>`, 'Uno por línea. Se ofrece al registrar cada elaboración.')}
       ${field('Pruebas de control de calidad', `<textarea name="qc_tests" rows="4">${esc(s.qc_tests.join('\n'))}</textarea>`, 'Una por línea. Aparecen en el control de calidad de cada elaboración.')}
+      ${field('Ensayos de materias primas', `<textarea name="mp_qc_tests" rows="4">${esc((s.mp_qc_tests || []).join('\n'))}</textarea>`, 'Uno por línea. Aparecen en el control de calidad de cada lote recibido.')}
     </div></section>
     <button class="btn block" type="submit">Guardar ajustes</button>
   </form>
@@ -939,6 +956,7 @@ async function importBackup(file) {
     const nextLot = Math.max(Number(local.lot.next) || 1, Number(incomingSettings.lot && incomingSettings.lot.next) || 1);
     merged.lot = { ...(takeIncoming ? { ...local.lot, ...(incomingSettings.lot || {}) } : local.lot), next: nextLot };
     if (!Array.isArray(merged.equipment)) merged.equipment = local.equipment;
+    if (!Array.isArray(merged.mp_qc_tests)) merged.mp_qc_tests = local.mp_qc_tests;
     if (!merged.pricing || !(isNum(merged.pricing.p_factor) && merged.pricing.p_factor > 0) || !(isNum(merged.pricing.iva) && merged.pricing.iva >= 0)) merged.pricing = local.pricing;
     if (!Array.isArray(merged.qc_tests)) merged.qc_tests = local.qc_tests;
     if (JSON.stringify(merged) !== JSON.stringify(local)) newSettings = merged;
@@ -1131,6 +1149,7 @@ const FORMS = {
       pricing: { p_factor: pFactor, iva },
       equipment: lines(d.equipment),
       qc_tests: lines(d.qc_tests),
+      mp_qc_tests: lines(d.mp_qc_tests),
     };
     await saveSettings(updated, `Farmacia, lotes (próximo ${preview}), etiquetas, factor P ${fmtNum(pFactor)} €, IVA ${fmtNum(iva)} % y utillaje`);
     toast('Ajustes guardados.');

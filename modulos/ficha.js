@@ -1,7 +1,10 @@
 'use strict';
-/* FARMA·LAB móvil · Ficha de registro de formulación magistral (RD 175/2001, apartado 3.4.2 y ficha 2) en PDF A4. */
+/* FARMA·LAB móvil · Fichas del RD 175/2001 en PDF A4:
+   ficha 1, control de calidad de materias primas (apartado 3.2.3), y
+   ficha 2, registro de formulación magistral (apartado 3.4.2). */
 
 ROUTES.ficha = (arg) => viewRecordSheet(arg);
+ROUTES.fichamp = (arg) => viewMaterialSheet(arg);
 
 async function viewRecordSheet(id) {
   const p = await getOne('production', id);
@@ -69,7 +72,7 @@ async function recordSheetData(p, extra) {
     }),
     pharmacists: str(p.staff_pharmacists ?? p.operator),
     assistants: str(p.staff_assistants),
-    qcTests: (qc.tests || []).filter((t) => t.test || t.result).map((t) => [t.test || '—', t.result || '—', yesNo(t.ok)]),
+    qcTests: (qc.tests || []).filter((t) => str(t.result)).map((t) => [t.test || '—', t.result, yesNo(t.ok)]),   // solo las pruebas realizadas
     qcBy: str(qc.by), qcApparatus: str(qc.apparatus), qcReagents: str(qc.reagents),
     recetario: str(p.recetario_no),
     dispensedDate: isDay(p.dispensed_date) && p.status === 'dispensada' ? fmtDay(p.dispensed_date) : '',
@@ -82,12 +85,15 @@ async function recordSheetData(p, extra) {
   };
 }
 
-/** Maqueta la ficha en A4: cabecera, bloque de identificación, apartados del 3.4.2 y firma. */
-async function buildRecordSheetPdf(p, d, s, draftMissing) {
+/**
+ * Motor de maquetación de las fichas en A4 (pdf-lib, Helvetica): cabecera con la farmacia y el título,
+ * rejillas de datos, tablas que continúan en la página siguiente, recuadro de conformidad y firma, y pie numerado.
+ */
+async function createSheet({ title, subtitle, tag, running, footer, pharmacy, draftMissing = [] }) {
   const { PDFDocument, StandardFonts, rgb } = await loadPdfLib();
   const doc = await PDFDocument.create();
-  doc.setTitle(`Ficha de registro ${p.lot}`);
-  doc.setSubject('Ficha de registro de formulación magistral (RD 175/2001)');
+  doc.setTitle(running);
+  doc.setSubject(`${title} (RD 175/2001)`);
   doc.setCreator('FARMA·LAB');
   doc.setProducer('FARMA·LAB');
   const font = await doc.embedFont(StandardFonts.Helvetica);
@@ -101,7 +107,7 @@ async function buildRecordSheetPdf(p, d, s, draftMissing) {
   const C = {
     ink: rgb(0.106, 0.165, 0.227), muted: rgb(0.345, 0.408, 0.467), accent: rgb(0.039, 0.361, 0.255),
     line: rgb(0.82, 0.86, 0.85), band: rgb(0.925, 0.957, 0.945), head: rgb(0.953, 0.965, 0.961),
-    warn: rgb(0.52, 0.31, 0.04), warnBg: rgb(0.984, 0.933, 0.835),
+    warn: rgb(0.52, 0.31, 0.04), warnBg: rgb(0.984, 0.933, 0.835), bad: rgb(0.64, 0.14, 0.11),
   };
   const pages = [];
   let page; let y;
@@ -110,7 +116,7 @@ async function buildRecordSheetPdf(p, d, s, draftMissing) {
     pages.push(page);
     y = H - M;
     if (pages.length > 1) {
-      page.drawText(clean(`Ficha de registro de formulación magistral · Lote ${p.lot}`), { x: M, y: y - 8, size: 8, font: bold, color: C.muted });
+      page.drawText(clean(running), { x: M, y: y - 8, size: 8, font: bold, color: C.muted });
       y -= 14;
       page.drawLine({ start: { x: M, y }, end: { x: W - M, y }, thickness: 0.5, color: C.line });
       y -= 8;
@@ -139,18 +145,18 @@ async function buildRecordSheetPdf(p, d, s, draftMissing) {
     }
     return out;
   };
-  const paragraph = (value, { f = font, size = 9.2, color = C.ink, lh = 1.32, indent = 0 } = {}) => {
-    for (const ln of wrap(f, size, value, CW - indent)) {
+  const paragraph = (value, { f = font, size = 9.2, color = C.ink, lh = 1.32 } = {}) => {
+    for (const ln of wrap(f, size, value, CW)) {
       ensure(size * lh);
       y -= size * lh;
-      page.drawText(ln, { x: M + indent, y: y + size * 0.26, size, font: f, color });
+      page.drawText(ln, { x: M, y: y + size * 0.26, size, font: f, color });
     }
   };
   /** Título de apartado; keep = espacio mínimo para que no quede solo al pie de la página. */
-  const section = (title, keep = mm(12)) => {
+  const section = (name, keep = mm(12)) => {
     ensure(mm(14) + keep);
     y -= mm(4.2);
-    page.drawText(clean(title), { x: M, y: y - 10, size: 10.5, font: bold, color: C.accent });
+    page.drawText(clean(name), { x: M, y: y - 10, size: 10.5, font: bold, color: C.accent });
     y -= 14;
     page.drawLine({ start: { x: M, y }, end: { x: W - M, y }, thickness: 0.7, color: C.accent });
     y -= mm(2);
@@ -162,14 +168,15 @@ async function buildRecordSheetPdf(p, d, s, draftMissing) {
     const colW = (CW - 2 * pad - gap * (cols - 1)) / cols;
     const rows = [];
     let i = 0;
-    while (i < cells.length) {
+    const list = cells.filter(Boolean);
+    while (i < list.length) {
       const row = [];
       let used = 0;
-      while (i < cells.length && used + (cells[i].span || 1) <= cols) { row.push(cells[i]); used += cells[i].span || 1; i += 1; }
+      while (i < list.length && used + (list[i].span || 1) <= cols) { row.push(list[i]); used += list[i].span || 1; i += 1; }
       const laid = row.map((c) => {
         const w = colW * (c.span || 1) + gap * ((c.span || 1) - 1);
         const size = c.big ? 15 : 9.4;
-        const lines = c.value === '' ? [] : wrap(c.big ? bold : (c.strong ? bold : font), size, c.value, w);
+        const lines = c.value === '' ? [] : wrap(c.big || c.strong ? bold : font, size, c.value, w);
         return { ...c, w, size, lines, h: 11 + (c.value === '' ? 16 : lines.length * size * 1.28) };
       });
       rows.push({ laid, h: Math.max(...laid.map((c) => c.h)) + mm(2.2) });
@@ -189,10 +196,10 @@ async function buildRecordSheetPdf(p, d, s, draftMissing) {
         } else {
           for (const ln of c.lines) {
             ty -= c.size * 1.28;
-            page.drawText(ln, { x, y: ty + c.size * 0.26, size: c.size, font: c.big || c.strong ? bold : font, color: c.big ? C.accent : C.ink });
+            page.drawText(ln, { x, y: ty + c.size * 0.26, size: c.size, font: c.big || c.strong ? bold : font, color: c.big ? C.accent : c.bad ? C.bad : C.ink });
           }
         }
-        x += c.w + mm(4);
+        x += c.w + gap;
       }
       y -= r.h;
     }
@@ -239,21 +246,51 @@ async function buildRecordSheetPdf(p, d, s, draftMissing) {
     }
   };
 
-  // ---------------- cabecera
+  /** Recuadro final: decisión a la izquierda, fecha y firma del farmacéutico responsable a la derecha. */
+  const signature = ({ decision, rejected = false, signer = '' }) => {
+    const boxH = mm(30);
+    ensure(boxH + mm(8));
+    y -= mm(6);
+    const half = CW / 2;
+    page.drawRectangle({ x: M, y: y - boxH, width: CW, height: boxH, borderColor: C.ink, borderWidth: 0.8 });
+    page.drawLine({ start: { x: M + half, y }, end: { x: M + half, y: y - boxH }, thickness: 0.8, color: C.ink });
+    page.drawText('Conformidad', { x: M + mm(4), y: y - mm(4) - 7, size: 7.6, font: bold, color: C.muted });
+    wrap(bold, 10, decision, half - mm(8)).forEach((ln, k) => {
+      page.drawText(ln, { x: M + mm(4), y: y - mm(10) - 10 - k * 13, size: 10, font: bold, color: rejected ? C.bad : C.ink });
+    });
+    page.drawText('Fecha y firma del farmacéutico responsable', { x: M + half + mm(4), y: y - mm(4) - 7, size: 7.6, font: bold, color: C.muted });
+    const signY = y - boxH + mm(9);
+    page.drawLine({ start: { x: M + half + mm(4), y: signY }, end: { x: W - M - mm(4), y: signY }, thickness: 0.6, color: C.line });
+    const who = clean(signer);
+    if (who) page.drawText(who, { x: M + half + mm(4), y: signY - 11, size: 8.4, font, color: C.muted });
+    y -= boxH;
+  };
+
+  const finish = async () => {
+    const stamp = new Date().toLocaleString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    pages.forEach((pg, i) => {
+      pg.drawLine({ start: { x: M, y: M + mm(5) }, end: { x: W - M, y: M + mm(5) }, thickness: 0.5, color: C.line });
+      pg.drawText(clean(`${footer}${draftMissing.length ? ' · BORRADOR' : ''}`), { x: M, y: M, size: 7.4, font, color: C.muted });
+      const right = clean(`Página ${i + 1} de ${pages.length} · Generada el ${stamp}`);
+      pg.drawText(right, { x: W - M - font.widthOfTextAtSize(right, 7.4), y: M, size: 7.4, font, color: C.muted });
+    });
+    return new Blob([await doc.save()], { type: 'application/pdf' });
+  };
+
+  // ---------------- cabecera de la primera página
   newPage();
-  const ph = s.pharmacy;
+  const ph = pharmacy || {};
   page.drawText(clean(ph.name || 'Oficina de farmacia'), { x: M, y: y - 10, size: 10.5, font: bold, color: C.ink });
-  const tag = 'RD 175/2001 · Ficha 2';
-  page.drawText(tag, { x: W - M - font.widthOfTextAtSize(tag, 8), y: y - 9, size: 8, font, color: C.muted });
+  page.drawText(clean(tag), { x: W - M - font.widthOfTextAtSize(clean(tag), 8), y: y - 9, size: 8, font, color: C.muted });
   y -= 13;
   const contact = clean([ph.address, ph.phone && `Tel. ${ph.phone}`].filter(Boolean).join(' · '));
   if (contact) { page.drawText(contact, { x: M, y: y - 9, size: 8.2, font, color: C.muted }); y -= 11; }
   y -= mm(5);
-  page.drawText('Ficha de registro de formulación magistral', { x: M, y: y - 18, size: 18, font: bold, color: C.ink });
-  y -= 23;
-  page.drawText('Guía de elaboración, control y registro', { x: M, y: y - 10, size: 9.5, font, color: C.muted });
+  const titleSize = bold.widthOfTextAtSize(clean(title), 18) > CW ? 15 : 18;
+  page.drawText(clean(title), { x: M, y: y - titleSize, size: titleSize, font: bold, color: C.ink });
+  y -= titleSize + 5;
+  if (subtitle) { page.drawText(clean(subtitle), { x: M, y: y - 10, size: 9.5, font, color: C.muted }); }
   y -= mm(7);
-
   if (draftMissing.length) {
     const lines = wrap(font, 8.6, `Faltan datos: ${draftMissing.join(', ')}.`, CW - mm(8));
     const h = 14 + lines.length * 8.6 * 1.3 + mm(3);
@@ -263,8 +300,18 @@ async function buildRecordSheetPdf(p, d, s, draftMissing) {
     lines.forEach((ln) => { ty -= 8.6 * 1.3; page.drawText(ln, { x: M + mm(4), y: ty + 2.2, size: 8.6, font, color: C.warn }); });
     y -= h + mm(4);
   }
+  const gap = (v) => { y -= v; };
+  return { mm, C, bold, grid, table, paragraph, section, signature, finish, gap };
+}
 
-  grid([
+/** Ficha 2: guía de elaboración, control y registro de una fórmula magistral. */
+async function buildRecordSheetPdf(p, d, s, draftMissing) {
+  const sh = await createSheet({
+    title: 'Ficha de registro de formulación magistral', subtitle: 'Guía de elaboración, control y registro', tag: 'RD 175/2001 · Ficha 2',
+    running: `Ficha de registro de formulación magistral · Lote ${p.lot}`, footer: `FARMA·LAB · Lote ${p.lot}`, pharmacy: s.pharmacy, draftMissing,
+  });
+  const { mm, C, bold } = sh;
+  sh.grid([
     { label: 'Registro / Lote', value: p.lot, big: true, span: 2 },
     { label: 'Registro de elaboración', value: p.record_code },
     { label: 'Nombre', value: d.name, strong: true, span: 3 },
@@ -277,20 +324,19 @@ async function buildRecordSheetPdf(p, d, s, draftMissing) {
     { label: 'Condiciones de conservación', value: p.storage || '—', span: 3 },
   ], 3, { bg: C.band, pad: mm(4) });
 
-  // ---------------- apartados del 3.4.2
-  section('Composición');
-  paragraph(d.composition);
+  sh.section('Composición');
+  sh.paragraph(d.composition);
 
-  section('Modus operandi');
-  if (d.pnts.length) d.pnts.forEach((t) => paragraph(t, { f: bold, size: 9 }));
-  if (d.method) { if (d.pnts.length) y -= 3; paragraph(d.method); }
-  if (!d.pnts.length && !d.method) paragraph('—', { color: C.muted });
+  sh.section('Modus operandi');
+  if (d.pnts.length) d.pnts.forEach((t) => sh.paragraph(t, { f: bold, size: 9 }));
+  if (d.method) { if (d.pnts.length) sh.gap(3); sh.paragraph(d.method); }
+  if (!d.pnts.length && !d.method) sh.paragraph('—', { color: C.muted });
 
-  section('Utillaje utilizado');
-  paragraph(d.equipment || '—', { color: d.equipment ? C.ink : C.muted });
+  sh.section('Utillaje utilizado');
+  sh.paragraph(d.equipment || '—', { color: d.equipment ? C.ink : C.muted });
 
-  section('Datos de las materias primas', mm(22));
-  table([
+  sh.section('Datos de las materias primas', mm(22));
+  sh.table([
     { title: 'Principios activos / Excipientes', w: 0.29 },
     { title: 'Nº control o lote', w: 0.22 },
     { title: 'Proveedor', w: 0.17 },
@@ -298,28 +344,28 @@ async function buildRecordSheetPdf(p, d, s, draftMissing) {
     { title: 'Cantidad pesada', w: 0.11, right: true },
     { title: 'Unidad', w: 0.10 },
   ], d.materials);
-  y -= 3;
-  paragraph('PA: principio activo · EDO: excipiente de declaración obligatoria', { size: 7.4, color: C.muted });
+  sh.gap(3);
+  sh.paragraph('PA: principio activo · EDO: excipiente de declaración obligatoria', { size: 7.4, color: C.muted });
 
-  section('Datos del material de acondicionamiento', mm(18));
-  table([{ title: 'Tipo', w: 0.55 }, { title: 'Nº control o lote', w: 0.30 }, { title: 'Unidades', w: 0.15, right: true }], d.packaging);
+  sh.section('Datos del material de acondicionamiento', mm(18));
+  sh.table([{ title: 'Tipo', w: 0.55 }, { title: 'Nº control o lote', w: 0.30 }, { title: 'Unidades', w: 0.15, right: true }], d.packaging);
 
-  section('Personal elaborador', mm(14));
-  grid([{ label: 'Farmacéutico/s', value: d.pharmacists }, { label: 'Auxiliares (nombre y apellidos)', value: d.assistants || '—' }], 2);
+  sh.section('Personal elaborador', mm(14));
+  sh.grid([{ label: 'Farmacéutico/s', value: d.pharmacists }, { label: 'Auxiliares (nombre y apellidos)', value: d.assistants || '—' }], 2);
 
-  section('Control de calidad', mm(24));
-  table([{ title: 'Prueba realizada', w: 0.38 }, { title: 'Resultado', w: 0.47 }, { title: 'Conforme', w: 0.15 }], d.qcTests);
-  y -= mm(2);
-  grid([
+  sh.section('Control de calidad', mm(24));
+  sh.table([{ title: 'Prueba realizada', w: 0.38 }, { title: 'Resultado', w: 0.47 }, { title: 'Conforme', w: 0.15 }], d.qcTests);
+  sh.gap(mm(2));
+  sh.grid([
     { label: 'Número de control', value: p.record_code },
     { label: 'Realizado por', value: d.qcBy || '—' },
     { label: 'Fecha de caducidad', value: fmtDay(p.expiry_date) },
-    { label: 'Aparataje', value: d.qcApparatus || '—', span: 1 },
+    { label: 'Aparataje', value: d.qcApparatus || '—' },
     { label: 'Reactivos y su lote', value: d.qcReagents || '—', span: 2 },
   ], 3);
 
-  section('Datos de dispensación', mm(26));
-  grid([
+  sh.section('Datos de dispensación', mm(26));
+  sh.grid([
     { label: 'Nº de registro del Libro Recetario', value: d.recetario },
     { label: 'Fecha de dispensación', value: d.dispensedDate },
     { label: 'Cantidad dispensada', value: d.dispensedQty },
@@ -327,39 +373,138 @@ async function buildRecordSheetPdf(p, d, s, draftMissing) {
     { label: 'Paciente', value: d.patient },
   ], 3);
 
-  section('Observaciones');
-  paragraph(d.notes || '—', { color: d.notes ? C.ink : C.muted });
+  sh.section('Observaciones');
+  sh.paragraph(d.notes || '—', { color: d.notes ? C.ink : C.muted });
 
-  // ---------------- conformidad y firma
-  const boxH = mm(34);
-  ensure(boxH + mm(8));
-  y -= mm(6);
-  const half = CW / 2;
-  page.drawRectangle({ x: M, y: y - boxH, width: CW, height: boxH, borderColor: C.ink, borderWidth: 0.8 });
-  page.drawLine({ start: { x: M + half, y }, end: { x: M + half, y: y - boxH }, thickness: 0.8, color: C.ink });
-  page.drawText('Conformidad', { x: M + mm(4), y: y - mm(4) - 7, size: 7.6, font: bold, color: C.muted });
-  wrap(bold, 10, d.decision, half - mm(8)).forEach((ln, k) => {
-    page.drawText(ln, { x: M + mm(4), y: y - mm(10) - 10 - k * 13, size: 10, font: bold, color: p.decision === 'rechazada' ? rgb(0.64, 0.14, 0.11) : C.ink });
+  sh.signature({
+    decision: d.decision, rejected: p.decision === 'rechazada',
+    signer: [s.pharmacy.pharmacist || p.decision_by, d.decisionDate && `Fecha: ${d.decisionDate}`].filter(Boolean).join(' · '),
   });
-  page.drawText('Fecha y firma del farmacéutico responsable', { x: M + half + mm(4), y: y - mm(4) - 7, size: 7.6, font: bold, color: C.muted });
-  const signY = y - boxH + mm(9);
-  page.drawLine({ start: { x: M + half + mm(4), y: signY }, end: { x: W - M - mm(4), y: signY }, thickness: 0.6, color: C.line });
-  const signer = clean([ph.pharmacist || p.decision_by, d.decisionDate && `Fecha: ${d.decisionDate}`].filter(Boolean).join(' · '));
-  if (signer) page.drawText(signer, { x: M + half + mm(4), y: signY - 11, size: 8.4, font, color: C.muted });
-  y -= boxH;
+  return sh.finish();
+}
 
-  // ---------------- pie de página
-  const stamp = new Date().toLocaleString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-  pages.forEach((pg, i) => {
-    pg.drawLine({ start: { x: M, y: M + mm(5) }, end: { x: W - M, y: M + mm(5) }, thickness: 0.5, color: C.line });
-    pg.drawText(clean(`FARMA·LAB · Lote ${p.lot}${draftMissing.length ? ' · BORRADOR' : ''}`), { x: M, y: M, size: 7.4, font, color: C.muted });
-    const right = clean(`Página ${i + 1} de ${pages.length} · Generada el ${stamp}`);
-    pg.drawText(right, { x: W - M - font.widthOfTextAtSize(right, 7.4), y: M, size: 7.4, font, color: C.muted });
+// ------------------------------------------------------------------ ficha 1: control de calidad de materias primas
+/** Datos de la ficha 1 que faltan en un lote. */
+function materialSheetMissing(m) {
+  const miss = [];
+  const tests = (m.qc && m.qc.tests) || [];
+  if (!m.internal_no) miss.push('nº de registro de control interno');
+  if (!str(m.supplier)) miss.push('proveedor');
+  if (!isNum(m.quantity_received) && !isNum(m.quantity)) miss.push('cantidad');
+  if (!isDay(m.expiry) && !isDay(m.retest_date)) miss.push('fecha de caducidad o de repetición del control analítico');
+  if (!tests.some((t) => str(t.result))) miss.push('ensayos realizados y sus resultados');
+  if (tests.some((t) => str(t.result) && t.ok === null)) miss.push('conformidad de cada ensayo');
+  if (!str(m.qc && m.qc.methods) && !tests.some((t) => str(t.method))) miss.push('técnicas o métodos analíticos');
+  if (!['aceptado', 'rechazado'].includes(m.status) || !isDay(m.decision_date)) miss.push('decisión de aceptación o rechazo');
+  return miss;
+}
+
+async function viewMaterialSheet(id) {
+  const m = await getOne('material', id);
+  if (!m) return empty('Este lote no existe.', '');
+  state.parent = `#materias--${m.uuid}`;
+  state.label = null;
+  const missing = materialSheetMissing(m);
+  return `<div class="panel">
+      <div class="head-row"><h2 class="big">${esc(m.name)}</h2>${pill('material', m.status)}</div>
+      <p>${m.internal_no ? `${esc(m.internal_no)} · ` : ''}Lote ${esc(m.lot)}${m.supplier ? ` · ${esc(m.supplier)}` : ''}</p>
+    </div>
+    ${missing.length
+      ? `<div class="msg warn"><strong>Faltan datos:</strong> ${esc(missing.join(', '))}. Se puede generar como borrador; para la ficha definitiva, complétalos en la <a href="#materias--${esc(m.uuid)}">ficha del lote</a>.</div>`
+      : '<p class="msg ok">El control de calidad del lote está completo.</p>'}
+    <form class="form" data-form="materialSheet" data-id="${esc(m.uuid)}" novalidate>
+      ${formMsg()}
+      <button class="btn block" type="submit">${missing.length ? 'Generar borrador de la ficha' : 'Generar ficha de control de calidad'}</button>
+    </form>
+    <div id="sheetOut"></div>`;
+}
+
+const MATERIAL_DECISION = { aceptado: 'Aceptado', rechazado: 'Rechazado', bloqueado: 'Bloqueado' };
+/** Ficha 1: identificación del lote, controles efectuados, decisión y firma. */
+async function buildMaterialSheetPdf(m, s, bulletins, draftMissing) {
+  const sh = await createSheet({
+    title: 'Ficha de control de calidad de materias primas', subtitle: 'Datos de identificación y controles efectuados', tag: 'RD 175/2001 · Ficha 1',
+    running: `Ficha de control de calidad · ${m.name} · lote ${m.lot}`, footer: `FARMA·LAB · ${m.internal_no ? `${m.internal_no} · ` : ''}lote ${m.lot}`,
+    pharmacy: s.pharmacy, draftMissing,
   });
-  return new Blob([await doc.save()], { type: 'application/pdf' });
+  const { mm, C } = sh;
+  const qc = m.qc || {};
+  const qty = isNum(m.quantity_received) ? m.quantity_received : m.quantity;
+  sh.grid([
+    { label: 'Nº de registro de control interno', value: m.internal_no || '—', big: true, span: 2 },
+    { label: 'Estado', value: STATUS.material[m.status] || m.status },
+    { label: 'Nombre de la materia prima', value: m.name, strong: true, span: 2 },
+    { label: 'Tipo', value: `${KIND_LABELS[m.kind] || 'Sin indicar'}${m.edo ? ' · excipiente de declaración obligatoria' : ''}` },
+    { label: 'Número de lote', value: m.lot },
+    { label: 'Proveedor', value: m.supplier || '—' },
+    { label: 'Código de artículo', value: m.code || '—' },
+    { label: 'Cantidad recibida', value: `${fmtNum(qty)} ${m.unit}${m.containers ? ` en ${m.containers} ${m.containers === 1 ? 'envase' : 'envases'}` : ''}` },
+    { label: 'Fecha de recepción', value: fmtDay(m.received_date) },
+    { label: 'Fecha de caducidad', value: fmtDay(m.expiry) },
+    isDay(m.retest_date) ? { label: 'Repetición del control analítico', value: fmtDay(m.retest_date) } : null,
+  ], 3, { bg: C.band, pad: mm(4) });
+
+  sh.section('Controles efectuados', mm(24));
+  const yesNo = (v) => (v === true ? 'Sí' : v === false ? 'No' : '—');
+  sh.table([
+    { title: 'Ensayo', w: 0.27 }, { title: 'Técnica o método', w: 0.30 }, { title: 'Resultado', w: 0.30 }, { title: 'Conforme', w: 0.13 },
+  ], (qc.tests || []).filter((t) => str(t.result) || str(t.method)).map((t) => [t.test || '—', t.method || '—', t.result || '—', yesNo(t.ok)]));
+  sh.gap(mm(2));
+  sh.grid([
+    { label: 'Realizado por', value: qc.by || '—' },
+    { label: 'Fecha del control', value: isDay(qc.date) ? fmtDay(qc.date) : '—' },
+    { label: 'Monografía de referencia', value: m.monograph || '—' },
+    { label: 'Boletín de análisis del proveedor', value: [m.qc_no && `Nº ${m.qc_no}`, bulletins.length && `archivado: ${bulletins.join(', ')}`].filter(Boolean).join(' · ') || '—', span: 3 },
+  ], 3);
+
+  sh.section('Descripción de los métodos analíticos');
+  sh.paragraph(qc.methods || '—', { color: qc.methods ? C.ink : C.muted });
+
+  sh.section('Datos complementarios', mm(16));
+  sh.grid([
+    { label: 'Condiciones de conservación', value: m.storage || '—' },
+    { label: 'Precauciones de manipulación', value: m.handling || '—' },
+    { label: 'Toxicidad y peligrosidad', value: m.toxicity || '—' },
+  ], 3);
+
+  sh.section('Observaciones');
+  sh.paragraph(m.observations || '—', { color: m.observations ? C.ink : C.muted });
+
+  const decided = MATERIAL_DECISION[m.status] && isDay(m.decision_date);
+  sh.signature({
+    decision: decided ? `${MATERIAL_DECISION[m.status]} el ${fmtDay(m.decision_date)} por ${m.decision_by || '—'}` : 'En cuarentena: pendiente de decisión',
+    rejected: m.status === 'rechazado',
+    signer: [m.decision_by || s.pharmacy.pharmacist, decided && `Fecha: ${fmtDay(m.decision_date)}`].filter(Boolean).join(' · '),
+  });
+  return sh.finish();
+}
+
+/** Muestra el PDF generado con los botones de descarga y la vista previa. */
+async function showSheet(blob, name, heading) {
+  state.label = { blob, name };
+  const canShare = navigator.canShare && navigator.canShare({ files: [new File([blob], name, { type: 'application/pdf' })] });
+  const out = $('#sheetOut');
+  out.innerHTML = `<section><h2>${esc(heading)}</h2>
+    <div class="actions"><button class="btn" data-act="downloadLabel">Descargar PDF</button>${canShare ? '<button class="btn secondary" data-act="shareLabel">Compartir o imprimir</button>' : ''}</div>
+    <p class="hint">A4 vertical. Imprímela al 100 %, fírmala y archívala.</p>
+    <div id="docview" class="docview spaced"><p class="hint">Preparando la vista previa...</p></div></section>`;
+  renderDocument($('#docview'));
+  out.scrollIntoView({ behavior: 'smooth', block: 'start' });
 }
 
 Object.assign(FORMS, {
+  async materialSheet(form) {
+    const m = await getOne('material', form.dataset.id);
+    if (!m) throw new InputError('Este lote ya no existe.');
+    const s = await loadSettings();
+    const missing = materialSheetMissing(m);
+    const bulletins = (await docsOf(m.uuid)).filter((f) => f.kind === 'boletin').map((f) => f.name);
+    const blob = await buildMaterialSheetPdf(m, s, bulletins, missing);
+    const slug = String(m.internal_no || m.lot).replace(/[^A-Za-z0-9._-]+/g, '-');
+    await logOnly('ficha_mp_generada', `${m.name} / ${m.lot}${missing.length ? ' (borrador)' : ''}`);
+    await showSheet(blob, `ficha-control-${slug}.pdf`, missing.length ? 'Borrador listo' : 'Ficha lista');
+  },
+
   async recordSheet(form) {
     const p = await getOne('production', form.dataset.id);
     if (!p || !p.lot) throw new InputError('Esta elaboración aún no tiene lote.');
@@ -369,16 +514,7 @@ Object.assign(FORMS, {
     const missing = pendingItems(p);
     const data = await recordSheetData(p, extra);
     const blob = await buildRecordSheetPdf(p, data, s, missing);
-    const name = `ficha-registro-${p.lot}.pdf`;
-    state.label = { blob, name };
     await logOnly('ficha_generada', `${p.lot} ${p.formula_name}${missing.length ? ' (borrador)' : ''}`);
-    const canShare = navigator.canShare && navigator.canShare({ files: [new File([blob], name, { type: 'application/pdf' })] });
-    const out = $('#sheetOut');
-    out.innerHTML = `<section><h2>${missing.length ? 'Borrador listo' : 'Ficha lista'}</h2>
-      <div class="actions"><button class="btn" data-act="downloadLabel">Descargar PDF</button>${canShare ? '<button class="btn secondary" data-act="shareLabel">Compartir o imprimir</button>' : ''}</div>
-      <p class="hint">A4 vertical. Imprímela al 100 %, fírmala y archívala con la receta.</p>
-      <div id="docview" class="docview spaced"><p class="hint">Preparando la vista previa...</p></div></section>`;
-    renderDocument($('#docview'));
-    out.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    await showSheet(blob, `ficha-registro-${p.lot}.pdf`, missing.length ? 'Borrador listo' : 'Ficha lista');
   },
 });
