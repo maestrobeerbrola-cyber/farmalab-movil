@@ -1,9 +1,11 @@
 /* FARMA·LAB móvil — service worker: guarda la app para usarla sin conexión.
    Al publicar una versión nueva, cambia VERSION (y APP_VERSION en app.js). */
-const VERSION = '0.2.0';
+const VERSION = '0.3.0';
 const CACHE = `farmalab-movil-${VERSION}`;
 // Imprescindibles: si falta alguno, no se instala esta versión.
-const CORE = ['./', './index.html', './app.js', './styles.css', './manifest.webmanifest'];
+const CORE = ['./', './index.html', './app.js', './styles.css', './manifest.webmanifest',
+  './modulos/documentos.js', './modulos/almacen.js', './modulos/formulas.js', './modulos/elaborar.js', './modulos/calculadora.js', './modulos/precios.js',
+  './datos/tabla1-principios-activos.json', './datos/precio-tasado-2026.json'];
 // Complementos: si alguno falla, la app funciona igual y se guardará cuando se use.
 const EXTRA = [
   './icons/icon-192.png', './icons/icon-512.png', './icons/icon-maskable-512.png', './icons/apple-touch-icon.png',
@@ -16,6 +18,7 @@ const EXTRA = [
     'LiberationSans-Bold.ttf', 'LiberationSans-BoldItalic.ttf', 'LiberationSans-Italic.ttf', 'LiberationSans-Regular.ttf']
     .map((f) => `./vendor/pdfjs/standard_fonts/${f}`),
   './vendor/mammoth/mammoth.browser.min.js',
+  './vendor/pdf-lib/pdf-lib.min.js',
 ];
 const fresh = (url) => new Request(url, { cache: 'reload' });
 

@@ -1,0 +1,352 @@
+'use strict';
+/* FARMA·LAB móvil · Almacén: materias primas (PN/L/PG/005) y material de acondicionamiento (PN/L/PG/006). */
+
+const STORE_TABS = [['#materias', 'Materias primas'], ['#envases', 'Acondicionamiento']];
+const KIND_LABELS = { activo: 'Principio activo', excipiente: 'Excipiente' };
+const PACK_KINDS = { primario: 'Primario', secundario: 'Secundario' };
+const AEMPS_ALERTS_URL = 'https://www.aemps.gob.es/comunicacion/alertas/alertas-farmaceuticas-y-retiradas-de-lotes-de-medicamentos-de-uso-humano-por-defectos-de-calidad/';
+
+ROUTES.materias = (arg, extra) => (arg === 'nueva' ? viewMaterialForm() : arg && extra === 'editar' ? viewMaterialForm(arg) : arg ? viewMaterial(arg) : viewMaterials());
+ROUTES.envases = (arg, extra) => (arg === 'nuevo' ? viewPackagingForm() : arg && extra === 'editar' ? viewPackagingForm(arg) : arg ? viewPackaging(arg) : viewPackagings());
+
+// ------------------------------------------------------------------ stock
+const usable = (r) => ['aceptado', 'cuarentena'].includes(r.status) && !(isDay(r.expiry) && daysUntil(r.expiry) < 0);
+/**
+ * Agrupa lotes de la misma sustancia (o del mismo envase) y compara su stock con el mínimo más alto indicado.
+ * Solo cuentan los lotes aceptados o en cuarentena y sin caducar.
+ */
+function stockGroups(records, kind) {
+  const groups = new Map();
+  for (const r of records) {
+    const key = fold(r.name);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(r);
+  }
+  const out = [];
+  for (const lots of groups.values()) {
+    const withMin = lots.filter((r) => isNum(r.min_stock) && r.min_stock > 0);
+    if (!withMin.length) continue;
+    const ref = withMin.reduce((a, b) => ((convertQty(b.min_stock, b.unit || 'unidades', a.unit || 'unidades') ?? 0) > a.min_stock ? b : a));
+    const unit = kind === 'packaging' ? 'unidades' : ref.unit;
+    let total = 0;
+    for (const r of lots.filter(usable)) {
+      const q = kind === 'packaging' ? r.quantity : convertQty(r.quantity, r.unit, unit);
+      if (isNum(q)) total += q;
+    }
+    out.push({ name: ref.name, total: round6(total), unit, min: ref.min_stock, low: total <= ref.min_stock, active: lots.some((r) => r.kind === 'activo'), sample: ref.uuid });
+  }
+  return out;
+}
+const stockClass = (r) => (isNum(r.min_stock) && r.min_stock > 0 && r.quantity <= r.min_stock ? 'bad' : '');
+
+// ------------------------------------------------------------------ Materias primas
+async function viewMaterials() {
+  const items = (await getAll('material')).sort(byText('name'));
+  const list = items.length
+    ? `<ul class="list" data-list>${items.map((m) => `<li data-text="${esc(lc([m.name, m.lot, m.internal_no, m.code, m.supplier, m.qc_no].join(' ')))}"><a class="row" href="#materias--${esc(m.uuid)}"><div class="row-main"><strong>${esc(m.name)}${m.internal_no ? ` <span class="code">${esc(m.internal_no)}</span>` : ''}</strong><span class="sub"><span>Lote ${esc(m.lot)}</span><span>Cad. ${fmtDay(m.expiry)}</span><span class="${stockClass(m)}">${fmtNum(m.quantity)} ${esc(m.unit)}</span>${m.kind === 'activo' ? '<span class="doc-tag pa">PA</span>' : ''}${m.edo ? '<span class="doc-tag edo">EDO</span>' : ''}</span></div>${pill('material', m.status)}</a></li>`).join('')}</ul><p class="none" data-none hidden>Ningún lote coincide con la búsqueda.</p>`
+    : empty('Aún no hay materias primas registradas.', 'Registra la primera recepción con «Nuevo lote».');
+  return `${segmented(STORE_TABS, '#materias')}${items.length ? searchBox('Buscar nombre, lote, nº interno o proveedor') : ''}${list}${fab('#materias--nueva', 'Nuevo lote')}`;
+}
+
+async function viewMaterial(id) {
+  const m = await getOne('material', id);
+  if (!m) return empty('Este lote no existe.', 'Puede que el enlace no sea correcto.');
+  const all = await getAll('material');
+  const group = stockGroups(all.filter((x) => fold(x.name) === fold(m.name)), 'material')[0];
+  const sameLots = all.filter((x) => fold(x.name) === fold(m.name) && usable(x));
+  let totalLine = '';
+  if (sameLots.length > 1) {
+    let total = 0;
+    sameLots.forEach((x) => { const q = convertQty(x.quantity, x.unit, m.unit); if (isNum(q)) total += q; });
+    totalLine = `<p class="hint">Stock de ${esc(m.name)} en ${sameLots.length} lotes utilizables: <strong>${fmtNum(round6(total))} ${esc(m.unit)}</strong>.</p>`;
+  }
+  const expired = isDay(m.expiry) && daysUntil(m.expiry) < 0;
+  const used = (await getAll('production')).filter((p) => (p.weighings || []).some((w) => w.material_uuid === m.uuid || (w.material_lot && lc(w.material_lot) === lc(m.lot) && fold(w.ingredient) === fold(m.name))));
+  const q = encodeURIComponent(m.name);
+  return `<div class="panel">
+    <div class="head-row"><h2 class="big">${esc(m.name)}</h2>${pill('material', m.status)}</div>
+    ${facts([
+      ['Nº registro interno', m.internal_no ? `<strong>${esc(m.internal_no)}</strong>` : '<span class="warn">Sin asignar</span>'],
+      ['Tipo', `${esc(KIND_LABELS[m.kind] || 'Sin indicar')}${m.edo ? ' · <span class="warn">Excipiente de declaración obligatoria</span>' : ''}`],
+      ['Proveedor', val(m.supplier)],
+      ['Lote', val(m.lot)],
+      ['Nº control de calidad', val(m.qc_no)],
+      ['Recepción', `${fmtDay(m.received_date)}${m.containers ? ` · ${esc(m.containers)} ${m.containers === 1 ? 'envase' : 'envases'}` : ''}`],
+      ['Cantidad recibida', isNum(m.quantity_received) ? `${fmtNum(m.quantity_received)} ${esc(m.unit)}` : '—'],
+      ['Stock actual', `<span class="${stockClass(m)}">${fmtNum(m.quantity)} ${esc(m.unit)}</span>${isNum(m.min_stock) ? ` (mínimo ${fmtNum(m.min_stock)} ${esc(m.unit)})` : ''}`],
+      ['Caducidad', `${fmtDay(m.expiry)}${expired ? ' <span class="bad">caducado</span>' : ''}`],
+      ['Decisión', m.decision_date ? `${esc(STATUS.material[m.status])} el ${fmtDay(m.decision_date)} por ${esc(m.decision_by)}` : '<span class="warn">Pendiente</span>'],
+      m.code ? ['Código de artículo', val(m.code)] : null,
+    ])}
+    ${totalLine}
+    <div class="actions spaced"><a class="btn secondary small" href="#materias--${esc(m.uuid)}--editar">Editar ficha</a></div>
+  </div>
+  <section><h2>Especificaciones</h2><div class="panel">${facts([
+    ['Monografía', val(m.monograph)],
+    ['Conservación', val(m.storage)],
+    ['Precauciones', val(m.handling)],
+    ['Toxicidad y peligrosidad', val(m.toxicity)],
+  ])}${m.observations ? `<p class="pre spaced">${esc(m.observations)}</p>` : ''}</div></section>
+  <section><h2>Decisión de aceptación o rechazo</h2>${statusButtons('material', m)}
+    <p class="hint">Al aceptar o rechazar, la decisión queda fechada y firmada con tu nombre en la ficha y en el registro de actividad.</p></section>
+  <section><h2>Regularizar stock</h2>${stockAdjustForm('material', m)}</section>
+  ${group && group.low ? `<p class="msg error">Stock bajo de ${esc(m.name)}: quedan ${fmtNum(group.total)} ${esc(group.unit)} y el mínimo es ${fmtNum(group.min)} ${esc(group.unit)}.</p>` : ''}
+  ${await docsSection('material', m.uuid, ['boletin', 'fds', 'especificaciones', 'otro'], 'Boletín de análisis, ficha de seguridad y otros documentos')}
+  <section><h2>Alertas y retiradas</h2><div class="panel stack">
+    <p>Consulta en la AEMPS si hay alertas o retiradas que afecten a esta materia prima o a sus medicamentos.</p>
+    <div class="actions">
+      <a class="btn secondary small" href="https://www.aemps.gob.es/?s=${q}" target="_blank" rel="noopener noreferrer">${ICON.ext}Buscar «${esc(m.name.slice(0, 30))}» en la AEMPS</a>
+      <a class="btn secondary small" href="${AEMPS_ALERTS_URL}" target="_blank" rel="noopener noreferrer">${ICON.ext}Alertas de calidad AEMPS</a>
+    </div>
+    <p class="hint">Se abren en el navegador; necesitan conexión.</p>
+  </div></section>
+  ${used.length ? `<section><h2>Usado en</h2><ul class="list">${used.map((p) => `<li><a class="row" href="#elaboraciones--${esc(p.uuid)}"><div class="row-main"><strong>${esc(p.lot || p.record_code)}</strong><span class="sub"><span>${esc(p.formula_name)}</span></span></div>${pill('production', p.status)}</a></li>`).join('')}</ul></section>` : ''}`;
+}
+
+function viewMaterialFormHtml(m) {
+  const v = m || { status: 'cuarentena', received_date: todayIso(), unit: 'g', kind: 'excipiente' };
+  const detected = edoMatch(v.name);
+  return `<form class="form" data-form="material" ${m ? `data-id="${esc(m.uuid)}"` : ''} novalidate>
+    ${formMsg()}
+    <fieldset class="group"><legend>Identificación</legend>
+      ${field('Nombre (DOE o DCI)', text('name', `value="${esc(v.name || '')}" required maxlength="160" data-edo-source`))}
+      <p class="hint edo-hint" data-edo-hint>${detected ? `Figura como excipiente de declaración obligatoria: ${esc(detected)}.` : ''}</p>
+      <div class="grid2">
+        ${field('Tipo', `<select name="kind">${options(Object.keys(KIND_LABELS), v.kind || 'excipiente', KIND_LABELS)}</select>`)}
+        ${field('Nº registro interno', text('internal_no', `value="${esc(v.internal_no || '')}" maxlength="40"`), 'Vuestro número de control interno.')}
+      </div>
+      ${checkbox('edo', 'Excipiente de declaración obligatoria', m ? m.edo : Boolean(detected), 'data-edo-check')}
+    </fieldset>
+    <fieldset class="group"><legend>Recepción</legend>
+      ${field('Proveedor', text('supplier', `value="${esc(v.supplier || '')}" maxlength="160"`))}
+      <div class="grid2">
+        ${field('Lote del proveedor', text('lot', `value="${esc(v.lot || '')}" required maxlength="100"`))}
+        ${field('Nº control de calidad', text('qc_no', `value="${esc(v.qc_no || '')}" maxlength="80"`), 'Nº de boletín de análisis.')}
+      </div>
+      <div class="grid2">
+        ${field('Fecha de recepción', dateInput('received_date', v.received_date))}
+        ${field('Nº de envases', `<input type="text" inputmode="numeric" name="containers" value="${esc(v.containers ?? '')}" maxlength="5">`)}
+      </div>
+      <div class="grid2">
+        ${field(m ? 'Stock actual' : 'Cantidad recibida', decimal('quantity', `value="${esc(inputNum(v.quantity))}" required`))}
+        ${field('Unidad', `<select name="unit">${options(MATERIAL_UNITS, v.unit || 'g')}</select>`)}
+      </div>
+      <div class="grid2">
+        ${field('Stock mínimo', decimal('min_stock', `value="${esc(inputNum(v.min_stock))}"`), 'Aviso de reposición.')}
+        ${field('Caducidad', dateInput('expiry', v.expiry))}
+      </div>
+      ${field('Código de artículo', text('code', `value="${esc(v.code || '')}" maxlength="80"`), 'Opcional: código del proveedor.')}
+    </fieldset>
+    <fieldset class="group"><legend>Especificaciones</legend>
+      ${field('Monografía (RFE u otra farmacopea)', text('monograph', `value="${esc(v.monograph || '')}" maxlength="160"`), 'Por ejemplo: RFE nº 0435, o «especificaciones del proveedor».')}
+      ${field('Condiciones de conservación', text('storage', `value="${esc(v.storage || '')}" maxlength="200"`))}
+      ${field('Precauciones al manipular', `<textarea name="handling" maxlength="1000">${esc(v.handling || '')}</textarea>`)}
+      ${field('Toxicidad y peligrosidad', `<textarea name="toxicity" maxlength="1000">${esc(v.toxicity || '')}</textarea>`)}
+    </fieldset>
+    ${field('Observaciones', `<textarea name="observations" maxlength="2000">${esc(v.observations || '')}</textarea>`, 'Incluida la revisión anual del estado del producto.')}
+    ${m ? '' : field('Estado', `<select name="status">${options(Object.keys(STATUS.material), 'cuarentena', STATUS.material)}</select>`, 'Tras la recepción queda en cuarentena hasta la decisión del farmacéutico.')}
+    <button class="btn block" type="submit">${m ? 'Guardar cambios' : 'Registrar lote'}</button>
+  </form>`;
+}
+async function viewMaterialForm(id) {
+  const m = id ? await getOne('material', id) : null;
+  if (id && !m) return empty('Este lote no existe.', '');
+  return viewMaterialFormHtml(m);
+}
+
+// Aviso automático de excipiente de declaración obligatoria al escribir el nombre.
+INPUT_HOOKS.push((t) => {
+  if (!t.matches('[data-edo-source]')) return;
+  const form = t.closest('form');
+  const hit = edoMatch(t.value);
+  const hint = $('[data-edo-hint]', form);
+  if (hint) hint.textContent = hit ? `Figura como excipiente de declaración obligatoria: ${hit}.` : '';
+  const check = $('[data-edo-check]', form);
+  if (check && hit && !check.dataset.touched) check.checked = true;
+});
+CHANGE_HOOKS.push((t) => { if (t.matches('[data-edo-check]')) t.dataset.touched = '1'; });
+
+function stockAdjustForm(store, r) {
+  return `<form class="panel form" data-form="stockAdjust" data-store="${store}" data-id="${esc(r.uuid)}" novalidate>
+    ${formMsg()}
+    <div class="grid2">
+      ${field(`Stock real (${esc(store === 'packaging' ? 'unidades' : r.unit)})`, decimal('quantity', `value="${esc(inputNum(r.quantity))}"`))}
+      ${field('Motivo', text('reason', 'maxlength="160" placeholder="Recuento, merma, rotura..."'))}
+    </div>
+    <button class="btn secondary" type="submit">Guardar stock</button>
+  </form>`;
+}
+
+async function uniqueInternal(store, value, selfId) {
+  if (!value) return;
+  const clash = (await getAll(store)).find((x) => x.uuid !== selfId && x.internal_no && lc(x.internal_no) === lc(value));
+  if (clash) throw new InputError(`El nº de registro interno ${value} ya está asignado a ${clash.name}${clash.lot ? ` (lote ${clash.lot})` : ''}.`);
+}
+
+Object.assign(FORMS, {
+  async material(form) {
+    const d = formData(form);
+    const prev = form.dataset.id ? await getOne('material', form.dataset.id) : null;
+    const name = str(d.name); const lot = str(d.lot); const code = str(d.code); const internal = str(d.internal_no);
+    if (!name || !lot) throw new InputError('El nombre y el lote son obligatorios.');
+    const quantity = parseNum(d.quantity, prev ? 'Stock actual' : 'Cantidad recibida');
+    if (quantity === null || quantity < 0) throw new InputError('Indica la cantidad.');
+    const minStock = parseNum(d.min_stock, 'Stock mínimo');
+    const containers = intOrNull(d.containers, 'Nº de envases');
+    await uniqueInternal('material', internal, prev && prev.uuid);
+    if (code && (await getAll('material')).some((m) => m.uuid !== (prev && prev.uuid) && m.code && lc(m.code) === lc(code) && lc(m.lot) === lc(lot))) {
+      throw new InputError('Ya existe ese código de artículo con el mismo lote.');
+    }
+    const rec = {
+      ...(prev || { uuid: newId(), status: STATUS.material[d.status] ? d.status : 'cuarentena', quantity_received: quantity }),
+      name: name.slice(0, 160), kind: KIND_LABELS[d.kind] ? d.kind : 'excipiente', edo: d.edo === 'on', internal_no: internal.slice(0, 40),
+      supplier: str(d.supplier).slice(0, 160), lot: lot.slice(0, 100), qc_no: str(d.qc_no).slice(0, 80),
+      received_date: isDay(d.received_date) ? d.received_date : null, containers,
+      quantity, unit: MATERIAL_UNITS.includes(d.unit) ? d.unit : 'g', min_stock: minStock,
+      expiry: isDay(d.expiry) ? d.expiry : null, code: code.slice(0, 80),
+      monograph: str(d.monograph).slice(0, 160), storage: str(d.storage).slice(0, 200),
+      handling: str(d.handling).slice(0, 1000), toxicity: str(d.toxicity).slice(0, 1000), observations: str(d.observations).slice(0, 2000),
+    };
+    await save('material', rec, prev ? 'edicion_materia_prima' : 'alta_lote_materia_prima', `${rec.name} / ${rec.lot}${rec.internal_no ? ` (${rec.internal_no})` : ''}`);
+    toast(prev ? 'Ficha guardada.' : 'Lote registrado. Queda en cuarentena hasta su aceptación.');
+    location.hash = `#materias--${rec.uuid}`;
+  },
+
+  async stockAdjust(form) {
+    const { store, id } = form.dataset;
+    if (!['material', 'packaging'].includes(store)) return;
+    const r = await getOne(store, id);
+    if (!r) throw new InputError('Esta ficha ya no existe.');
+    const q = parseNum(form.elements.quantity.value, 'Stock real');
+    if (q === null || q < 0) throw new InputError('Indica el stock real.');
+    const reason = str(form.elements.reason.value).slice(0, 160);
+    if (!reason) throw new InputError('Indica el motivo de la regularización.');
+    const before = r.quantity;
+    r.quantity = q;
+    const unit = store === 'packaging' ? 'unidades' : r.unit;
+    await save(store, r, store === 'material' ? 'edicion_materia_prima' : 'edicion_acondicionamiento', `${r.name} / ${r.lot || '—'}: stock ${fmtNum(before)} → ${fmtNum(q)} ${unit} (${reason})`);
+    toast('Stock regularizado.');
+    await route();
+  },
+});
+
+STATUS_CHECKS.material = async (m, status) => {
+  if (!['aceptado', 'rechazado'].includes(status)) return null;
+  if (status === 'rechazado') {
+    return { title: 'Rechazar materia prima', message: `Se registrará el rechazo de ${m.name} (lote ${m.lot}) con fecha de hoy y a tu nombre. Debe devolverse al proveedor o eliminarse, y mantenerse aparte mientras tanto.`, confirmLabel: 'Rechazar', danger: true };
+  }
+  const missing = [];
+  if (!m.internal_no) missing.push('el nº de registro interno');
+  const hasBulletin = (await docsOf(m.uuid)).some((f) => f.kind === 'boletin');
+  if (!m.qc_no && !hasBulletin) missing.push('el nº de control de calidad o el boletín de análisis');
+  if (isDay(m.expiry) && daysUntil(m.expiry) < 0) missing.push('una caducidad vigente (el lote está caducado)');
+  return {
+    title: 'Aceptar materia prima',
+    message: missing.length
+      ? `Falta ${missing.join(', ')}. Sin el boletín de análisis la materia prima debería seguir en cuarentena.\n\n¿Aceptarla igualmente?`
+      : `Se registrará la aceptación de ${m.name} (lote ${m.lot}) con fecha de hoy y a tu nombre.`,
+    confirmLabel: missing.length ? 'Aceptar igualmente' : 'Aceptar',
+  };
+};
+
+// ------------------------------------------------------------------ Material de acondicionamiento
+async function viewPackagings() {
+  const items = (await getAll('packaging')).sort(byText('name'));
+  const list = items.length
+    ? `<ul class="list" data-list>${items.map((p) => `<li data-text="${esc(lc([p.name, p.lot, p.internal_no, p.supplier, p.capacity].join(' ')))}"><a class="row" href="#envases--${esc(p.uuid)}"><div class="row-main"><strong>${esc(p.name)}${p.internal_no ? ` <span class="code">${esc(p.internal_no)}</span>` : ''}</strong><span class="sub"><span>${esc(PACK_KINDS[p.kind] || 'Primario')}</span>${p.lot ? `<span>Lote ${esc(p.lot)}</span>` : ''}<span class="${stockClass(p)}">${fmtNum(p.quantity)} uds.</span>${isDay(p.expiry) ? `<span>Cad. ${fmtDay(p.expiry)}</span>` : ''}</span></div>${pill('packaging', p.status)}</a></li>`).join('')}</ul><p class="none" data-none hidden>Nada coincide con la búsqueda.</p>`
+    : empty('Aún no hay material de acondicionamiento.', 'Registra tarros, frascos, cápsulas, cajas o prospectos con «Nuevo envase».');
+  return `${segmented(STORE_TABS, '#envases')}${items.length ? searchBox('Buscar envase, lote o nº interno') : ''}${list}${fab('#envases--nuevo', 'Nuevo envase')}`;
+}
+
+async function viewPackaging(id) {
+  const p = await getOne('packaging', id);
+  if (!p) return empty('Este material no existe.', '');
+  const used = (await getAll('production')).filter((x) => (x.packaging_used || []).some((u) => u.packaging_uuid === p.uuid));
+  return `<div class="panel">
+    <div class="head-row"><h2 class="big">${esc(p.name)}</h2>${pill('packaging', p.status)}</div>
+    ${facts([
+      ['Nº registro interno', p.internal_no ? `<strong>${esc(p.internal_no)}</strong>` : '<span class="warn">Sin asignar</span>'],
+      ['Acondicionamiento', esc(PACK_KINDS[p.kind] || 'Primario')],
+      ['Capacidad', val(p.capacity)],
+      ['Proveedor', val(p.supplier)],
+      ['Lote', val(p.lot)],
+      ['Recepción', `${fmtDay(p.received_date)}${p.containers ? ` · ${esc(p.containers)} ${p.containers === 1 ? 'caja o paquete' : 'cajas o paquetes'}` : ''}`],
+      ['Stock actual', `<span class="${stockClass(p)}">${fmtNum(p.quantity)} unidades</span>${isNum(p.min_stock) ? ` (mínimo ${fmtNum(p.min_stock)})` : ''}`],
+      ['Caducidad', fmtDay(p.expiry)],
+      ['Conservación', val(p.storage)],
+      ['Decisión', p.decision_date ? `${esc(STATUS.packaging[p.status])} el ${fmtDay(p.decision_date)} por ${esc(p.decision_by)}` : '<span class="warn">Pendiente</span>'],
+    ])}
+    ${p.observations ? `<p class="pre spaced">${esc(p.observations)}</p>` : ''}
+    <div class="actions spaced"><a class="btn secondary small" href="#envases--${esc(p.uuid)}--editar">Editar ficha</a></div>
+  </div>
+  <section><h2>Decisión de aceptación o rechazo</h2>${statusButtons('packaging', p)}</section>
+  <section><h2>Regularizar stock</h2>${stockAdjustForm('packaging', p)}<p class="hint">El stock baja solo cuando una elaboración que usa este envase se marca como elaborada.</p></section>
+  ${await docsSection('packaging', p.uuid, ['especificaciones', 'otro'])}
+  ${used.length ? `<section><h2>Usado en</h2><ul class="list">${used.map((x) => `<li><a class="row" href="#elaboraciones--${esc(x.uuid)}"><div class="row-main"><strong>${esc(x.lot || x.record_code)}</strong><span class="sub"><span>${esc(x.formula_name)}</span></span></div>${pill('production', x.status)}</a></li>`).join('')}</ul></section>` : ''}`;
+}
+
+async function viewPackagingForm(id) {
+  const p = id ? await getOne('packaging', id) : null;
+  if (id && !p) return empty('Este material no existe.', '');
+  const v = p || { kind: 'primario', received_date: todayIso(), status: 'aceptado' };
+  return `<form class="form" data-form="packaging" ${p ? `data-id="${esc(p.uuid)}"` : ''} novalidate>
+    ${formMsg()}
+    ${field('Identificación (tipo de envase)', text('name', `value="${esc(v.name || '')}" required maxlength="160" placeholder="Tarro de vidrio topacio, frasco PET, cápsulas nº 1..."`))}
+    <div class="grid2">
+      ${field('Acondicionamiento', `<select name="kind">${options(Object.keys(PACK_KINDS), v.kind || 'primario', PACK_KINDS)}</select>`)}
+      ${field('Capacidad', text('capacity', `value="${esc(v.capacity || '')}" maxlength="40" placeholder="50 g, 100 ml..."`))}
+    </div>
+    <div class="grid2">
+      ${field('Nº registro interno', text('internal_no', `value="${esc(v.internal_no || '')}" maxlength="40"`))}
+      ${field('Proveedor', text('supplier', `value="${esc(v.supplier || '')}" maxlength="160"`))}
+    </div>
+    <div class="grid2">
+      ${field('Lote', text('lot', `value="${esc(v.lot || '')}" maxlength="100"`), 'Obligatorio en el primario.')}
+      ${field('Fecha de recepción', dateInput('received_date', v.received_date))}
+    </div>
+    <div class="grid2">
+      ${field(p ? 'Stock actual (unidades)' : 'Unidades recibidas', `<input type="text" inputmode="numeric" name="quantity" value="${esc(v.quantity ?? '')}" required maxlength="7">`)}
+      ${field('Nº de cajas o paquetes', `<input type="text" inputmode="numeric" name="containers" value="${esc(v.containers ?? '')}" maxlength="5">`)}
+    </div>
+    <div class="grid2">
+      ${field('Stock mínimo', `<input type="text" inputmode="numeric" name="min_stock" value="${esc(v.min_stock ?? '')}" maxlength="7">`, 'Aviso de reposición.')}
+      ${field('Caducidad', dateInput('expiry', v.expiry), 'Si procede.')}
+    </div>
+    ${field('Condiciones de conservación', text('storage', `value="${esc(v.storage || '')}" maxlength="200"`), 'Si procede.')}
+    ${field('Observaciones', `<textarea name="observations" maxlength="2000">${esc(v.observations || '')}</textarea>`, 'Revisión anual, eliminación de material caducado u obsoleto...')}
+    ${p ? '' : field('Estado', `<select name="status">${options(Object.keys(STATUS.packaging), 'aceptado', STATUS.packaging)}</select>`)}
+    <button class="btn block" type="submit">${p ? 'Guardar cambios' : 'Registrar envase'}</button>
+  </form>`;
+}
+
+Object.assign(FORMS, {
+  async packaging(form) {
+    const d = formData(form);
+    const prev = form.dataset.id ? await getOne('packaging', form.dataset.id) : null;
+    const name = str(d.name);
+    if (!name) throw new InputError('Indica la identificación del envase.');
+    const quantity = intOrNull(d.quantity, prev ? 'Stock actual' : 'Unidades recibidas');
+    if (quantity === null) throw new InputError('Indica las unidades.');
+    const kind = PACK_KINDS[d.kind] ? d.kind : 'primario';
+    if (kind === 'primario' && !str(d.lot)) throw new InputError('El acondicionamiento primario necesita el nº de lote.');
+    const internal = str(d.internal_no);
+    await uniqueInternal('packaging', internal, prev && prev.uuid);
+    const status = prev ? prev.status : (STATUS.packaging[d.status] ? d.status : 'aceptado');
+    const rec = {
+      ...(prev || { uuid: newId(), status, quantity_received: quantity, ...(status === 'aceptado' ? { decision_date: todayIso(), decision_by: state.profile.name } : {}) }),
+      name: name.slice(0, 160), kind, capacity: str(d.capacity).slice(0, 40), internal_no: internal.slice(0, 40),
+      supplier: str(d.supplier).slice(0, 160), lot: str(d.lot).slice(0, 100), received_date: isDay(d.received_date) ? d.received_date : null,
+      quantity, containers: intOrNull(d.containers, 'Nº de cajas'), min_stock: intOrNull(d.min_stock, 'Stock mínimo'),
+      expiry: isDay(d.expiry) ? d.expiry : null, storage: str(d.storage).slice(0, 200), observations: str(d.observations).slice(0, 2000),
+    };
+    await save('packaging', rec, prev ? 'edicion_acondicionamiento' : 'alta_acondicionamiento', `${rec.name}${rec.lot ? ` / ${rec.lot}` : ''}`);
+    toast(prev ? 'Ficha guardada.' : 'Envase registrado.');
+    location.hash = `#envases--${rec.uuid}`;
+  },
+});
+
+STATUS_CHECKS.packaging = async (p, status) => {
+  if (status === 'rechazado') return { title: 'Rechazar material', message: `Se registrará el rechazo de ${p.name} con fecha de hoy y a tu nombre. Debe devolverse al proveedor.`, confirmLabel: 'Rechazar', danger: true };
+  if (status === 'aceptado' && !p.internal_no) return { title: 'Aceptar material', message: 'Falta el nº de registro interno. ¿Aceptarlo igualmente?', confirmLabel: 'Aceptar igualmente' };
+  return null;
+};

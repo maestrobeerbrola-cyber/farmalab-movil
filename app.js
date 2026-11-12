@@ -6,13 +6,13 @@
  * sincronizarlo más adelante con la versión de PC.
  */
 
-const APP_VERSION = '0.2.0';
+const APP_VERSION = '0.3.0';
 const PREVIEW = document.documentElement.dataset.preview === '1'; // copia de prueba publicada en Claude
 const DB_NAME = 'farmalab-movil';
 const EXPORT_FORMAT = 'farmalab-datos';
-const EXPORT_FORMAT_VERSION = 2;          // 2: incluye los documentos de los PNT
-const DB_VERSION = 2;                     // 2: almacén de documentos de PNT
-const FILE_STORE = 'pnt_file';
+const EXPORT_FORMAT_VERSION = 3;          // 3: acondicionamiento, bibliografía, documentos de cualquier ficha y ajustes
+const DB_VERSION = 3;                     // 3: acondicionamiento, bibliografía, documentos genéricos, estados de elaboración
+const FILE_STORE = 'pnt_file';            // documentos adjuntos (PNT, materias primas, acondicionamiento, bibliografía)
 const MAX_DOC_BYTES = 25 * 1048576;
 const DOC_TYPES = {
   pdf: { label: 'PDF', mime: 'application/pdf' },
@@ -20,35 +20,57 @@ const DOC_TYPES = {
   doc: { label: 'Word 97-2003', mime: 'application/msword' },
 };
 const DOC_ACCEPT = '.pdf,.docx,.doc,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword';
-const STORES = ['material', 'formula', 'pnt', 'production', 'audit'];
+const DOC_KINDS = { documento: 'Documento', boletin: 'Boletín de análisis', fds: 'Ficha de datos de seguridad', especificaciones: 'Especificaciones', otro: 'Otro' };
+const STORES = ['material', 'packaging', 'formula', 'pnt', 'biblio', 'production', 'audit'];
 const LOCK_HIDDEN_MS = 5 * 60 * 1000;   // bloqueo tras 5 min con la app en segundo plano
 const LOCK_IDLE_MS = 15 * 60 * 1000;    // o tras 15 min sin tocar la pantalla
 const PBKDF2_ITERATIONS = 200000;
 const BACKUP_REMINDER_DAYS = 7;
 const EXPIRY_WARNING_DAYS = 30;
+const STALE_PRODUCTION_DAYS = 2;
 
-const MATERIAL_UNITS = ['g', 'kg', 'ml', 'l', 'unidades'];
-const COMPONENT_UNITS = ['g', 'ml', 'mg', 'unidades'];
+const MATERIAL_UNITS = ['g', 'kg', 'mg', 'ml', 'l', 'unidades'];
+const COMPONENT_UNITS = ['g', 'mg', 'ml', 'unidades'];
 const FORMULA_UNITS = ['g', 'ml', 'unidades'];
 const STATUS = {
-  material: { cuarentena: 'Cuarentena', aceptado: 'Aceptado', bloqueado: 'Bloqueado' },
+  material: { cuarentena: 'Cuarentena', aceptado: 'Aceptado', rechazado: 'Rechazado', bloqueado: 'Bloqueado' },
+  packaging: { cuarentena: 'Cuarentena', aceptado: 'Aceptado', rechazado: 'Rechazado' },
   formula: { borrador: 'Borrador', aprobada: 'Aprobada', obsoleta: 'Obsoleta' },
   pnt: { borrador: 'Borrador', vigente: 'Vigente', obsoleto: 'Obsoleto' },
-  production: { borrador: 'En elaboración', pendiente_revision: 'Pendiente de revisión' },
+  production: { en_proceso: 'En proceso', elaborada: 'Elaborada', dispensada: 'Dispensada', rechazada: 'Rechazada' },
 };
-const TONE = { cuarentena: 'amber', aceptado: 'green', bloqueado: 'red', aprobada: 'green', vigente: 'green', pendiente_revision: 'amber' };
+const TONE = {
+  cuarentena: 'amber', aceptado: 'green', rechazado: 'red', bloqueado: 'red', aprobada: 'green', vigente: 'green',
+  en_proceso: 'amber', elaborada: 'blue', dispensada: 'green', rechazada: 'red',
+};
 const ACTION_LABELS = {
   inicio_sesion: 'Desbloqueo de la app',
   alta_lote_materia_prima: 'Alta de lote de materia prima',
-  cambio_estado_materia_prima: 'Cambio de estado de materia prima',
+  edicion_materia_prima: 'Ficha de materia prima modificada',
+  cambio_estado_materia_prima: 'Decisión sobre materia prima',
+  alta_acondicionamiento: 'Alta de material de acondicionamiento',
+  edicion_acondicionamiento: 'Ficha de acondicionamiento modificada',
+  cambio_estado_acondicionamiento: 'Decisión sobre acondicionamiento',
   alta_formula: 'Alta de fórmula',
+  edicion_formula: 'Fórmula modificada',
   cambio_estado_formula: 'Cambio de estado de fórmula',
   alta_pnt: 'Alta de PNT',
   alta_documento_pnt: 'Documento de PNT subido',
+  alta_documento: 'Documento adjuntado',
   cambio_estado_pnt: 'Cambio de estado de PNT',
+  alta_bibliografia: 'Alta en bibliografía',
+  edicion_bibliografia: 'Bibliografía modificada',
   crear_registro_elaboracion: 'Nuevo registro de elaboración',
-  actualizar_pesadas: 'Pesadas y lotes guardados',
+  actualizar_pesadas: 'Guía de elaboración guardada',
   enviar_revision: 'Enviado a revisión farmacéutica',
+  marcar_elaborada: 'Fórmula elaborada (lote asignado)',
+  marcar_dispensada: 'Fórmula dispensada',
+  rechazar_elaboracion: 'Elaboración rechazada',
+  asignar_lote: 'Lote asignado',
+  consumo_stock: 'Consumo de stock',
+  etiqueta_generada: 'Etiqueta generada',
+  valoracion_precio: 'Precio de valoración guardado',
+  ajustes: 'Ajustes modificados',
   cambio_pin: 'Cambio de PIN',
   exportar_copia: 'Copia de seguridad exportada',
   importar_copia: 'Copia importada',
@@ -59,20 +81,72 @@ const ACTION_LABELS = {
 const SECTIONS = {
   '': { title: 'FARMA·LAB', tab: 0 },
   materias: { title: 'Materias primas', tab: 1 },
+  envases: { title: 'Acondicionamiento', tab: 1 },
   formulas: { title: 'Fórmulas', tab: 2 },
   elaboraciones: { title: 'Elaboraciones', tab: 3 },
+  etiqueta: { title: 'Etiqueta', tab: 3 },
   pnt: { title: 'PNT', tab: 4 },
+  biblio: { title: 'Bibliografía', tab: 4 },
+  documento: { title: 'Documento', tab: 4 },
+  calculadora: { title: 'Calculadora' },
+  valoracion: { title: 'Valoración' },
   ajustes: { title: 'Ajustes' },
   auditoria: { title: 'Actividad' },
-  documento: { title: 'Documento', tab: 4 },
 };
+
+/** Utillaje mínimo (RD 175/2001, equipamiento general) como lista inicial editable en Ajustes. */
+const DEFAULT_EQUIPMENT = [
+  'Balanza de precisión 1 mg', 'Probetas', 'Pipetas', 'Matraces aforados', 'Mortero', 'Baño de agua', 'Agitador',
+  'Espátulas', 'Termómetro', 'Vasos de precipitados', 'Vidrio de reloj', 'Placa calefactora', 'pH-metro', 'Tamices',
+];
+const DEFAULT_QC_TESTS = ['Caracteres organolépticos (aspecto, color, olor)', 'Peso o volumen final', 'Homogeneidad', 'pH'];
+const DEFAULT_SETTINGS = {
+  pharmacy: { name: '', address: '', phone: '', pharmacist: '' },
+  lot: { letter: 'J', next: 1 },
+  equipment: DEFAULT_EQUIPMENT,
+  qc_tests: DEFAULT_QC_TESTS,
+  label: { layout: '8', all_components: false },
+  pricing: { p_factor: 3.65, iva: 4 },     // factor P 2026 (Anexo 3 del Convenio con la Comunidad de Madrid) e IVA de medicamentos
+  updated_at: '',
+};
+
+/** Excipientes de declaración obligatoria más habituales en formulación (Circular AEMPS 1/2018). */
+const EDO_LIST = [
+  ['Ácido bórico y boratos', /\bboric|\bborato|\bborax/],
+  ['Alcohol cetoestearílico / cetílico', /alcohol\s+(ceto)?estearil|alcohol\s+cetil|cetearyl|cetyl alcohol/],
+  ['Almidón (arroz, maíz, patata)', /almidon\s+de\s+(arroz|maiz|patata)/],
+  ['Almidón de trigo, avena, cebada o centeno (gluten)', /almidon\s+de\s+(trigo|avena|cebada|centeno|triticale)|gluten/],
+  ['Bálsamo del Perú', /balsamo\s+del?\s+peru/],
+  ['Butilhidroxitolueno (E-321)', /butilhidroxitolueno|\bbht\b|e-?321/],
+  ['Dimetilsulfóxido', /dimetilsulfoxido|\bdmso\b/],
+  ['Etanol', /\betanol\b|alcohol\s+etilico|alcohol\s+de\s+\d+|alcohol\s+\d+\s*[º°]/],
+  ['Glicerol (E-422)', /glicerol|glicerina|e-?422/],
+  ['Lactosa', /lactosa/],
+  ['Lanolina (grasa de lana)', /lanolina|grasa\s+de\s+lana/],
+  ['Laurilsulfato de sodio', /laurilsulfato|lauril\s+sulfato/],
+  ['Parahidroxibenzoatos (parabenos)', /parahidroxibenzoato|paraben|nipagin|nipasol|metilparaben|propilparaben/],
+  ['Propilenglicol (E-1520)', /propilenglicol|e-?1520/],
+  ['Sacarosa', /sacarosa/],
+  ['Sorbitol (E-420)', /sorbitol|e-?420/],
+];
+const fold = (v) => String(v ?? '').toLocaleLowerCase('es').normalize('NFD').replace(/[̀-ͯ]/g, '');
+const edoMatch = (name) => { const n = fold(name); const hit = EDO_LIST.find(([, re]) => re.test(n)); return hit ? hit[0] : null; };
 
 const state = {
   profile: null, deviceId: null, unlocked: false,
   hiddenAt: 0, lastTouch: Date.now(),
   deferredInstall: null, swWaiting: null, updateRequested: false,
   formulaCache: {}, materials: [], prevHash: '', parent: '#inicio', objectUrls: [],
+  settings: null, label: null,
 };
+
+// Registros que rellenan los módulos (modulos/*.js).
+const ROUTES = {};
+const AFTER_RENDER = [];
+const INPUT_HOOKS = [];
+const CHANGE_HOOKS = [];
+const STATUS_CHECKS = {};   // comprobaciones antes de cambiar de estado: store -> async (registro, estado) => opciones de ask() o null
+const ROW_BUILDERS = {};    // filas repetibles de los formularios (data-act="addRow" data-kind="...")
 
 // ------------------------------------------------------------------ utilidades
 class InputError extends Error {}
@@ -142,19 +216,48 @@ function checkPinFormat(pin) {
   if (!/^\d{4,8}$/.test(pin || '')) throw new InputError('El PIN debe tener entre 4 y 8 cifras.');
 }
 
+/** Conversión entre unidades de la misma magnitud (masa o volumen). Devuelve null si no son compatibles. */
+const UNIT_FACTORS = { kg: ['m', 1000], g: ['m', 1], mg: ['m', 0.001], 'µg': ['m', 1e-6], l: ['v', 1000], ml: ['v', 1], 'µl': ['v', 0.001], unidades: ['u', 1] };
+function convertQty(value, from, to) {
+  const a = UNIT_FACTORS[from]; const b = UNIT_FACTORS[to];
+  if (!isNum(value) || !a || !b || a[0] !== b[0]) return null;
+  return round6((value * a[1]) / b[1]);
+}
 // ------------------------------------------------------------------ base de datos
 let dbPromise = null;
+const LEGACY_PRODUCTION_STATUS = { borrador: 'en_proceso', pendiente_revision: 'elaborada' };
 function openDB() {
   if (!dbPromise) {
     dbPromise = new Promise((resolve, reject) => {
       const r = indexedDB.open(DB_NAME, DB_VERSION);
-      r.onupgradeneeded = () => {
-        // Solo crea lo que falta: al pasar de la v1 a la v2 no se toca ningún dato existente.
+      r.onupgradeneeded = (ev) => {
+        // Solo crea o completa lo que falta: los datos existentes se conservan en cada actualización.
         const db = r.result;
+        const t = r.transaction;
         if (!db.objectStoreNames.contains('meta')) db.createObjectStore('meta');
         STORES.forEach((s) => { if (!db.objectStoreNames.contains(s)) db.createObjectStore(s, { keyPath: 'uuid' }); });
-        if (!db.objectStoreNames.contains(FILE_STORE)) {
-          db.createObjectStore(FILE_STORE, { keyPath: 'uuid' }).createIndex('pnt_uuid', 'pnt_uuid');
+        const files = db.objectStoreNames.contains(FILE_STORE)
+          ? t.objectStore(FILE_STORE)
+          : db.createObjectStore(FILE_STORE, { keyPath: 'uuid' });
+        if (!files.indexNames.contains('pnt_uuid')) files.createIndex('pnt_uuid', 'pnt_uuid');
+        if (!files.indexNames.contains('owner_uuid')) files.createIndex('owner_uuid', 'owner_uuid');
+        if (ev.oldVersion > 0 && ev.oldVersion < 3) {
+          // v2 → v3: los documentos pasan a tener propietario genérico y cambian los estados de elaboración.
+          files.openCursor().onsuccess = (e) => {
+            const c = e.target.result;
+            if (!c) return;
+            if (!c.value.owner_uuid) c.update({ ...c.value, owner_type: 'pnt', owner_uuid: c.value.pnt_uuid, kind: c.value.kind || 'documento' });
+            c.continue();
+          };
+          t.objectStore('production').openCursor().onsuccess = (e) => {
+            const c = e.target.result;
+            if (!c) return;
+            const v = c.value;
+            if (LEGACY_PRODUCTION_STATUS[v.status]) {
+              c.update({ ...v, status: LEGACY_PRODUCTION_STATUS[v.status], status_changed_at: v.submitted_at || v.updated_at || v.created_at });
+            }
+            c.continue();
+          };
         }
       };
       r.onsuccess = () => {
@@ -163,7 +266,7 @@ function openDB() {
         resolve(db);
       };
       r.onerror = () => reject(r.error);
-      r.onblocked = () => reject(new Error('Cierra las otras pestañas de FARMA·LAB y vuelve a abrirla.'));
+      r.onblocked = () => reject(new Error('Cierra las otras ventanas de FARMA·LAB y vuelve a abrirla.'));
     });
   }
   return dbPromise;
@@ -189,8 +292,11 @@ function auditEntry(action, detail, stamp) {
     user: state.profile ? state.profile.name : '', action, detail: String(detail ?? '').slice(0, 500),
   };
 }
-/** Guarda uno o varios registros y su línea de auditoría en una sola operación. */
-async function saveMany(entries, action, detail) {
+/**
+ * Guarda uno o varios registros y su auditoría en una sola operación.
+ * extraAudit: líneas de auditoría adicionales [[acción, detalle], ...] (p. ej. consumos de stock).
+ */
+async function saveMany(entries, action, detail, extraAudit = [], metaPuts = {}) {
   const stamp = nowIso();
   entries.forEach(([, r]) => {
     r.created_at = r.created_at || stamp;
@@ -201,6 +307,8 @@ async function saveMany(entries, action, detail) {
   await tx(stores, 'readwrite', (t) => {
     entries.forEach(([store, r]) => t.objectStore(store).put(r));
     t.objectStore('audit').put(auditEntry(action, detail, stamp));
+    extraAudit.forEach(([a, d]) => t.objectStore('audit').put(auditEntry(a, d, stamp)));
+    Object.entries(metaPuts).forEach(([k, v]) => t.objectStore('meta').put(v, k));
     t.objectStore('meta').put(stamp, 'lastChange');
   });
 }
@@ -208,8 +316,33 @@ async function save(store, record, action, detail) {
   await saveMany([[store, record]], action, detail);
   return record;
 }
-const filesOf = (pntId) => tx(FILE_STORE, 'readonly', (t) => t.objectStore(FILE_STORE).index('pnt_uuid').getAll(pntId));
+const docsOf = (ownerUuid) => tx(FILE_STORE, 'readonly', (t) => t.objectStore(FILE_STORE).index('owner_uuid').getAll(ownerUuid));
 const logOnly = (action, detail) => tx('audit', 'readwrite', (t) => t.objectStore('audit').put(auditEntry(action, detail, nowIso())));
+
+/** Ajustes de la farmacia (datos para etiquetas, numeración de lotes, utillaje...). */
+async function loadSettings() {
+  const saved = (await metaGet('settings')) || {};
+  const s = {
+    ...DEFAULT_SETTINGS, ...saved,
+    pharmacy: { ...DEFAULT_SETTINGS.pharmacy, ...(saved.pharmacy || {}) },
+    lot: { ...DEFAULT_SETTINGS.lot, ...(saved.lot || {}) },
+    label: { ...DEFAULT_SETTINGS.label, ...(saved.label || {}) },
+    pricing: { ...DEFAULT_SETTINGS.pricing, ...(saved.pricing || {}) },
+  };
+  if (!(isNum(s.pricing.p_factor) && s.pricing.p_factor > 0)) s.pricing.p_factor = DEFAULT_SETTINGS.pricing.p_factor;
+  if (!(isNum(s.pricing.iva) && s.pricing.iva >= 0)) s.pricing.iva = DEFAULT_SETTINGS.pricing.iva;
+  state.settings = s;
+  return s;
+}
+async function saveSettings(s, detail) {
+  s.updated_at = nowIso();
+  await tx(['meta', 'audit'], 'readwrite', (t) => {
+    t.objectStore('meta').put(s, 'settings');
+    t.objectStore('meta').put(s.updated_at, 'lastChange');
+    t.objectStore('audit').put(auditEntry('ajustes', detail, s.updated_at));
+  });
+  state.settings = s;
+}
 
 // ------------------------------------------------------------------ iconos
 const svg = (body) => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${body}</svg>`;
@@ -225,11 +358,31 @@ const ICON = {
   plus: svg('<path d="M12 5v14M5 12h14"/>'),
   back: svg('<path d="M15 5l-7 7 7 7"/>'),
   x: svg('<path d="M6 6l12 12M18 6 6 18"/>'),
+  calc: svg('<rect x="5" y="3" width="14" height="18" rx="2"/><path d="M8 7h8M8.5 11h.01M12 11h.01M15.5 11h.01M8.5 14.5h.01M12 14.5h.01M15.5 14.5h.01M8.5 18h.01M12 18h3.5"/>'),
+  box: svg('<path d="M3.5 7.5 12 3l8.5 4.5v9L12 21l-8.5-4.5z"/><path d="M3.5 7.5 12 12l8.5-4.5M12 12v9"/>'),
+  book: svg('<path d="M5 4.5A1.5 1.5 0 0 1 6.5 3H19v15H6.5A1.5 1.5 0 0 0 5 19.5z"/><path d="M5 19.5A1.5 1.5 0 0 0 6.5 21H19v-3"/>'),
+  tag: svg('<path d="M3 12V4h8l9.5 9.5-8 8z"/><circle cx="7.5" cy="8.5" r="1.5"/>'),
+  ext: svg('<path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>'),
 };
-const TABS = [['#inicio', 'Inicio', ICON.home], ['#materias', 'Materias', ICON.jar], ['#formulas', 'Fórmulas', ICON.flask], ['#elaboraciones', 'Elaborar', ICON.scale], ['#pnt', 'PNT', ICON.doc]];
+const TABS = [['#inicio', 'Inicio', ICON.home], ['#materias', 'Almacén', ICON.box], ['#formulas', 'Fórmulas', ICON.flask], ['#elaboraciones', 'Elaborar', ICON.scale], ['#pnt', 'Documentos', ICON.doc]];
 
 // ------------------------------------------------------------------ piezas de interfaz
-const pill = (kind, status) => `<span class="pill ${TONE[status] || ''}">${esc(STATUS[kind][status] || status)}</span>`;
+const pill = (kind, status) => `<span class="pill ${TONE[status] || ''}">${esc((STATUS[kind] || {})[status] || status)}</span>`;
+const segmented = (items, current) => `<nav class="seg" aria-label="Apartados">${items.map(([href, label]) => `<a href="${href}"${href === current ? ' aria-current="page"' : ''}>${esc(label)}</a>`).join('')}</nav>`;
+const checkbox = (name, label, checked, attrs = '') => `<label class="check"><input type="checkbox" name="${name}"${checked ? ' checked' : ''} ${attrs}><span>${label}</span></label>`;
+const dateInput = (name, value, attrs = '') => `<input type="date" name="${name}" value="${isDay(value) ? value : ''}" ${attrs}>`;
+const STATUS_ACTIONS = { material: 'cambio_estado_materia_prima', packaging: 'cambio_estado_acondicionamiento', formula: 'cambio_estado_formula', pnt: 'cambio_estado_pnt' };
+const statusButtons = (store, rec) => `<div class="actions">${Object.keys(STATUS[store]).map((st) => `<button class="btn ${st === rec.status ? '' : 'secondary'}" data-act="setStatus" data-store="${store}" data-id="${esc(rec.uuid)}" data-status="${st}" ${st === rec.status ? 'disabled' : ''}>${STATUS[store][st]}</button>`).join('')}</div>`;
+const recordLabel = (store, r) => (store === 'pnt' ? `${r.code} ${r.title}` : store === 'formula' ? `${r.code || ''} ${r.name}`.trim() : `${r.name}${r.lot ? ` / ${r.lot}` : ''}`);
+const val = (v) => (v === null || v === undefined || v === '' ? '—' : esc(v));
+/** Lista de datos: pares [etiqueta, html ya escapado]; se omiten los vacíos si skipEmpty. */
+const facts = (pairs) => `<dl class="facts">${pairs.filter(Boolean).map(([k, v]) => `<dt>${esc(k)}</dt><dd>${v}</dd>`).join('')}</dl>`;
+const intOrNull = (v, label) => {
+  const t = str(v);
+  if (!t) return null;
+  if (!/^\d{1,7}$/.test(t)) throw new InputError(`${label}: escribe un número entero.`);
+  return Number(t);
+};
 const empty = (title, text) => `<div class="empty"><strong>${esc(title)}</strong>${esc(text)}</div>`;
 const fab = (href, label) => `<a class="fab" href="${href}">${ICON.plus}<span>${esc(label)}</span></a>`;
 const searchBox = (placeholder) => `<div class="search"><input type="search" data-filter placeholder="${esc(placeholder)}" aria-label="${esc(placeholder)}" autocomplete="off"></div>`;
@@ -365,6 +518,7 @@ async function boot() {
       await metaSet('deviceId', state.deviceId);
     }
     state.profile = await metaGet('profile');
+    await loadSettings();
   } catch (err) {
     app.innerHTML = `<div class="gate"><div class="gate-card">${gateBrand}<p>No se puede abrir la base de datos del teléfono: ${esc(err.message)}</p></div></div>`;
     return;
@@ -416,17 +570,22 @@ function renderShell() {
       <button class="icon-btn" data-act="back" id="backBtn" aria-label="Volver" hidden>${ICON.back}</button>
       <span class="mark" id="mark">${ICON.cross}</span>
       <h1 id="title">FARMA·LAB</h1>
+      <a class="icon-btn" href="#calculadora" aria-label="Calculadora">${ICON.calc}</a>
       <a class="icon-btn" href="#ajustes" aria-label="Ajustes y copias de seguridad">${ICON.sliders}</a>
       <button class="icon-btn" data-act="lock" aria-label="Bloquear">${ICON.lock}</button>
     </header>
     ${PREVIEW ? '<div class="banner preview">Vista previa para probar la app. No guardes aquí datos reales: las copias de seguridad y la instalación solo funcionan en la versión publicada.</div>' : ''}
     <div id="banner"></div>
     <main id="view" tabindex="-1"></main>
-    <nav class="tabbar" aria-label="Secciones">${TABS.map(([href, label, icon]) => `<a href="${href}"><span class="ind">${icon}</span>${label}</a>`).join('')}</nav>
+    <nav class="tabbar" aria-label="Secciones">${TABS.map(([href, label, icon], i) => `<a href="${href}"><span class="ind">${icon}${i === 0 ? '<span class="badge" id="alertBadge" hidden></span>' : ''}</span>${label}</a>`).join('')}</nav>
     <div id="toast" role="status" aria-live="polite"></div>
   </div>`;
   showUpdateBanner();
 }
+
+ROUTES[''] = () => viewHome();
+ROUTES.ajustes = () => viewSettings();
+ROUTES.auditoria = () => viewAudit();
 
 async function route() {
   if (!state.unlocked || !$('#view')) return;
@@ -440,24 +599,15 @@ async function route() {
   state.parent = arg ? `#${sec}` : (sec === 'auditoria' ? '#ajustes' : '#inicio');
   let html;
   try {
-    switch (sec) {
-      case '': html = await viewHome(); break;
-      case 'materias': html = arg === 'nueva' ? viewMaterialForm() : arg ? await viewMaterial(arg) : await viewMaterials(); break;
-      case 'formulas': html = arg === 'nueva' ? await viewFormulaForm() : arg ? await viewFormula(arg) : await viewFormulas(); break;
-      case 'elaboraciones': html = arg === 'nueva' ? await viewProductionNew(extra) : arg ? await viewProduction(arg) : await viewProductions(); break;
-      case 'pnt': html = arg === 'nuevo' ? viewPntForm() : arg ? await viewPnt(arg) : await viewPnts(); break;
-      case 'documento': html = await viewDocument(arg); break;
-      case 'ajustes': html = await viewSettings(); break;
-      case 'auditoria': html = await viewAudit(); break;
-      default: html = empty('Página no encontrada', 'Usa las pestañas de abajo para moverte por la app.');
-    }
+    const handler = ROUTES[sec];
+    html = handler ? await handler(arg, extra) : empty('Página no encontrada', 'Usa las pestañas de abajo para moverte por la app.');
   } catch (err) {
     console.error(err);
     html = `<div class="msg error">No se pudo mostrar esta pantalla: ${esc(err.message)}</div>`;
   }
   $('#view').innerHTML = html;
   $('#title').textContent = info.title;
-  const sub = Boolean(arg) || sec === 'ajustes' || sec === 'auditoria';
+  const sub = Boolean(arg) || ['ajustes', 'auditoria', 'calculadora', 'valoracion', 'etiqueta'].includes(sec);
   $('#backBtn').hidden = !sub;
   $('#mark').hidden = sub;
   $$('.tabbar a').forEach((a, i) => {
@@ -466,19 +616,11 @@ async function route() {
   });
   if (state.prevHash !== hash) window.scrollTo(0, 0);
   state.prevHash = hash;
-  afterRender();
+  AFTER_RENDER.forEach((fn) => { try { fn(); } catch (err) { console.error(err); } });
+  updateAlertBadge().catch(() => {});
 }
 
-function afterRender() {
-  const form = $('form[data-form="productionNew"]');
-  if (form) updatePreview(form);
-  $$('[data-weigh-actual]').forEach(updateDeviation);
-  $$('[data-weigh-lot]').forEach(updateLotWarning);
-  const viewer = $('#docview');
-  if (viewer) renderDocument(viewer);
-}
-
-// ------------------------------------------------------------------ Inicio
+// ------------------------------------------------------------------ Inicio y avisos
 async function backupStatus() {
   const [lastExport, lastChange] = await Promise.all([metaGet('lastExport'), metaGet('lastChange')]);
   const pending = Boolean(lastChange) && (!lastExport || lastChange > lastExport);
@@ -486,14 +628,54 @@ async function backupStatus() {
   return { lastExport, lastChange, remind: pending && old };
 }
 
+/** Avisos que la app calcula al abrirse: stock, caducidades, cuarentenas, elaboraciones paradas y fichas incompletas. */
+async function computeAlerts() {
+  const [mats, packs, prods] = await Promise.all([getAll('material'), getAll('packaging'), getAll('production')]);
+  const out = [];
+  for (const g of stockGroups(mats, 'material')) {
+    if (g.low) out.push({ tone: 'red', kind: 'Stock bajo', title: g.name, text: `Quedan ${fmtNum(round6(g.total))} ${g.unit} (mínimo ${fmtNum(g.min)} ${g.unit})${g.active ? '. Principio activo' : ''}`, href: `#materias--${g.sample}` });
+  }
+  for (const g of stockGroups(packs, 'packaging')) {
+    if (g.low) out.push({ tone: 'red', kind: 'Reponer envases', title: g.name, text: `Quedan ${fmtNum(g.total)} unidades (mínimo ${fmtNum(g.min)})`, href: `#envases--${g.sample}` });
+  }
+  const expiring = [...mats.map((m) => ['materias', m]), ...packs.map((p) => ['envases', p])]
+    .filter(([, r]) => isDay(r.expiry) && !['rechazado', 'bloqueado'].includes(r.status) && (r.quantity ?? 1) > 0 && daysUntil(r.expiry) <= EXPIRY_WARNING_DAYS)
+    .sort((a, b) => a[1].expiry.localeCompare(b[1].expiry));
+  for (const [sec, r] of expiring) {
+    const d = daysUntil(r.expiry);
+    const when = d < 0 ? `Caducado el ${fmtDay(r.expiry)}` : d === 0 ? 'Caduca hoy' : `Caduca el ${fmtDay(r.expiry)} (${d} ${d === 1 ? 'día' : 'días'})`;
+    out.push({ tone: d < 0 ? 'red' : 'amber', kind: 'Caducidad', title: r.name, text: `Lote ${r.lot || '—'}. ${when}`, href: `#${sec}--${r.uuid}` });
+  }
+  for (const [sec, r] of [...mats.map((m) => ['materias', m]), ...packs.map((p) => ['envases', p])]) {
+    if (r.status === 'cuarentena') out.push({ tone: 'amber', kind: 'En cuarentena', title: r.name, text: `Lote ${r.lot || '—'}: pendiente de aceptación o rechazo`, href: `#${sec}--${r.uuid}` });
+  }
+  for (const p of prods) {
+    if (p.status === 'en_proceso') {
+      const since = Date.parse(p.status_changed_at || p.created_at);
+      const days = Math.floor((Date.now() - since) / 864e5);
+      if (days >= STALE_PRODUCTION_DAYS) out.push({ tone: 'amber', kind: 'Elaboración pendiente', title: `${p.record_code} ${p.formula_name}`, text: `En proceso desde hace ${days} días sin cambiar de estado`, href: `#elaboraciones--${p.uuid}` });
+    }
+    if (['elaborada', 'dispensada'].includes(p.status)) {
+      const missing = pendingItems(p);
+      if (missing.length) out.push({ tone: 'amber', kind: 'Faltan datos', title: `${p.lot || p.record_code} ${p.formula_name}`, text: missing.join(', '), href: `#elaboraciones--${p.uuid}` });
+    }
+  }
+  return out;
+}
+async function updateAlertBadge() {
+  const badge = $('#alertBadge');
+  if (!badge) return;
+  const n = (await computeAlerts()).length;
+  badge.hidden = n === 0;
+  badge.textContent = n > 99 ? '99+' : String(n);
+}
+
 async function viewHome() {
-  const [mats, forms, pnts, prods, audit] = await Promise.all(['material', 'formula', 'pnt', 'production', 'audit'].map(getAll));
+  const [mats, packs, forms, pnts, prods, bib, audit] = await Promise.all(['material', 'packaging', 'formula', 'pnt', 'production', 'biblio', 'audit'].map(getAll));
   const backup = await backupStatus();
-  const open = prods.filter((p) => p.status === 'borrador').sort(byNewest);
-  const expiring = mats
-    .filter((m) => isDay(m.expiry) && m.status !== 'bloqueado' && daysUntil(m.expiry) <= EXPIRY_WARNING_DAYS)
-    .sort(byText('expiry'));
-  const recent = audit.sort(byNewest).slice(0, 6);
+  const alerts = await computeAlerts();
+  const open = prods.filter((p) => p.status === 'en_proceso').sort(byNewest);
+  const recent = audit.sort(byNewest).slice(0, 5);
   const standalone = matchMedia('(display-mode: standalone)').matches;
 
   let html = '';
@@ -503,23 +685,21 @@ async function viewHome() {
   if (state.deferredInstall && !standalone) {
     html += '<div class="msg ok reminder"><p>Instala FARMA·LAB para abrirla desde la pantalla de inicio y usarla sin conexión.</p><button class="btn small" data-act="install">Instalar</button></div>';
   }
-  html += '<section><h2>En elaboración</h2>';
+  html += `<section><h2>Avisos${alerts.length ? ` (${alerts.length})` : ''}</h2>`;
+  html += alerts.length
+    ? `<ul class="list alerts">${alerts.map((a) => `<li><a class="row" href="${esc(a.href)}"><span class="dot ${a.tone}" aria-hidden="true"></span><div class="row-main"><span class="kind">${esc(a.kind)}</span><strong>${esc(a.title)}</strong><span class="sub">${esc(a.text)}</span></div></a></li>`).join('')}</ul>`
+    : '<div class="empty"><strong>Todo en orden.</strong>Sin stock bajo, caducidades próximas ni fichas pendientes.</div>';
+  html += '</section><section><h2>En proceso</h2>';
   html += open.length
     ? `<ul class="list">${open.map((p) => `<li><a class="row" href="#elaboraciones--${esc(p.uuid)}"><div class="row-main"><strong>${esc(p.record_code)}</strong><span class="sub"><span>${esc(p.formula_name)}</span><span>${fmtNum(p.target_amount)} ${esc(p.unit)}</span><span>${progressText(p)}</span></span></div></a></li>`).join('')}</ul>`
-    : `<div class="empty"><strong>No hay elaboraciones abiertas.</strong><a class="btn secondary small" href="#elaboraciones--nueva">Nueva elaboración</a></div>`;
-  html += '</section>';
-  if (expiring.length) {
-    html += `<section><h2>Caducidades próximas</h2><ul class="list">${expiring.map((m) => {
-      const d = daysUntil(m.expiry);
-      const when = d < 0 ? `Caducado el ${fmtDay(m.expiry)}` : d === 0 ? 'Caduca hoy' : `Caduca el ${fmtDay(m.expiry)} (${d} ${d === 1 ? 'día' : 'días'})`;
-      return `<li><a class="row" href="#materias--${esc(m.uuid)}"><div class="row-main"><strong>${esc(m.name)}</strong><span class="sub"><span>Lote ${esc(m.lot)}</span><span class="${d < 0 ? 'bad' : 'warn'}">${when}</span></span></div></a></li>`;
-    }).join('')}</ul></section>`;
-  }
-  html += `<section><h2>Registros</h2><ul class="list counts">
-    <li><a class="row" href="#materias"><span class="row-main">Lotes de materia prima</span><b>${mats.length}</b></a></li>
+    : `<div class="empty"><strong>No hay elaboraciones en proceso.</strong><a class="btn secondary small" href="#elaboraciones--nueva">Nueva elaboración</a></div>`;
+  html += `</section><section><h2>Registros</h2><ul class="list counts">
+    <li><a class="row" href="#materias"><span class="row-main">Materias primas</span><b>${mats.length}</b></a></li>
+    <li><a class="row" href="#envases"><span class="row-main">Material de acondicionamiento</span><b>${packs.length}</b></a></li>
     <li><a class="row" href="#formulas"><span class="row-main">Fórmulas</span><b>${forms.length}</b></a></li>
     <li><a class="row" href="#elaboraciones"><span class="row-main">Elaboraciones</span><b>${prods.length}</b></a></li>
     <li><a class="row" href="#pnt"><span class="row-main">PNT</span><b>${pnts.length}</b></a></li>
+    <li><a class="row" href="#biblio"><span class="row-main">Bibliografía</span><b>${bib.length}</b></a></li>
   </ul></section>`;
   html += `<section><h2>Actividad reciente</h2>${recent.length ? auditList(recent) : empty('Sin actividad todavía.', '')}<p class="more"><a href="#auditoria">Ver toda la actividad</a></p></section>`;
   return html;
@@ -532,531 +712,11 @@ function auditList(items) {
   return `<ul class="list audit">${items.map((a) => `<li><div class="row"><div class="row-main"><strong>${esc(ACTION_LABELS[a.action] || a.action)}</strong><span class="sub"><span>${esc(fmtStamp(a.created_at))}</span>${a.detail ? `<span>${esc(a.detail)}</span>` : ''}</span></div></div></li>`).join('')}</ul>`;
 }
 
-// ------------------------------------------------------------------ Materias primas
-async function viewMaterials() {
-  const items = (await getAll('material')).sort(byText('name'));
-  const list = items.length
-    ? `<ul class="list" data-list>${items.map((m) => `<li data-text="${esc(lc([m.name, m.lot, m.code, m.supplier].join(' ')))}"><a class="row" href="#materias--${esc(m.uuid)}"><div class="row-main"><strong>${esc(m.name)}</strong><span class="sub"><span>Lote ${esc(m.lot)}</span><span>Cad. ${fmtDay(m.expiry)}</span><span>${fmtNum(m.quantity)} ${esc(m.unit)}</span></span></div>${pill('material', m.status)}</a></li>`).join('')}</ul><p class="none" data-none hidden>Ningún lote coincide con la búsqueda.</p>`
-    : empty('Aún no hay lotes registrados.', 'Registra el primero con «Nuevo lote».');
-  return `${items.length ? searchBox('Buscar nombre, lote o código') : ''}${list}${fab('#materias--nueva', 'Nuevo lote')}`;
-}
-
-async function viewMaterial(id) {
-  const m = await getOne('material', id);
-  if (!m) return empty('Este lote no existe.', 'Puede que se haya borrado o que el enlace no sea correcto.');
-  const expiry = isDay(m.expiry) ? daysUntil(m.expiry) : null;
-  return `<div class="panel">
-    <div class="head-row"><h2 class="big">${esc(m.name)}</h2>${pill('material', m.status)}</div>
-    <dl class="facts">
-      <dt>Lote</dt><dd>${esc(m.lot)}</dd>
-      <dt>Código</dt><dd>${esc(m.code || '—')}</dd>
-      <dt>Proveedor</dt><dd>${esc(m.supplier || '—')}</dd>
-      <dt>Cantidad</dt><dd>${fmtNum(m.quantity)} ${esc(m.unit)}</dd>
-      <dt>Caducidad</dt><dd>${fmtDay(m.expiry)}${expiry !== null && expiry < 0 ? ' <span class="bad">caducado</span>' : ''}</dd>
-      <dt>Registrado</dt><dd>${esc(fmtStamp(m.created_at))}</dd>
-    </dl>
-  </div>
-  <section><h2>Cambiar estado</h2><div class="actions">${Object.keys(STATUS.material).map((s) => `<button class="btn ${s === m.status ? '' : 'secondary'}" data-act="setStatus" data-store="material" data-id="${esc(m.uuid)}" data-status="${s}" ${s === m.status ? 'disabled' : ''}>${STATUS.material[s]}</button>`).join('')}</div></section>`;
-}
-
-function viewMaterialForm() {
-  return `<form class="form" data-form="material" novalidate>
-    ${formMsg()}
-    ${field('Nombre', text('name', 'required maxlength="160"'))}
-    ${field('Lote del proveedor', text('lot', 'required maxlength="100"'))}
-    <div class="grid2">
-      ${field('Cantidad', decimal('quantity', 'required'))}
-      ${field('Unidad', `<select name="unit">${options(MATERIAL_UNITS, 'g')}</select>`)}
-    </div>
-    ${field('Caducidad', '<input type="date" name="expiry">')}
-    ${field('Código', text('code', 'maxlength="80"'), 'Opcional. Si lo pones, no puede repetirse.')}
-    ${field('Proveedor', text('supplier', 'maxlength="160"'))}
-    ${field('Estado', `<select name="status">${options(Object.keys(STATUS.material), 'cuarentena', STATUS.material)}</select>`)}
-    <button class="btn block" type="submit">Guardar lote</button>
-  </form>`;
-}
-
-// ------------------------------------------------------------------ Fórmulas
-async function viewFormulas() {
-  const items = (await getAll('formula')).sort(byText('name'));
-  const list = items.length
-    ? `<ul class="list" data-list>${items.map((f) => `<li data-text="${esc(lc([f.name, f.code, f.form].join(' ')))}"><a class="row" href="#formulas--${esc(f.uuid)}"><div class="row-main"><strong>${esc(f.name)}</strong><span class="sub">${f.code ? `<span>${esc(f.code)}</span>` : ''}<span>Versión ${esc(f.version)}</span>${f.form ? `<span>${esc(f.form)}</span>` : ''}<span>${(f.components || []).length} componentes</span></span></div>${pill('formula', f.status)}</a></li>`).join('')}</ul><p class="none" data-none hidden>Ninguna fórmula coincide con la búsqueda.</p>`
-    : empty('Aún no hay fórmulas.', 'Crea la primera con «Nueva fórmula». Para elaborarla, márcala como Aprobada.');
-  return `${items.length ? searchBox('Buscar nombre, código o forma') : ''}${list}${fab('#formulas--nueva', 'Nueva fórmula')}`;
-}
-
-async function viewFormula(id) {
-  const f = await getOne('formula', id);
-  if (!f) return empty('Esta fórmula no existe.', '');
-  return `<div class="panel">
-    <div class="head-row"><h2 class="big">${esc(f.name)}</h2>${pill('formula', f.status)}</div>
-    <dl class="facts">
-      <dt>Código</dt><dd>${esc(f.code || '—')}</dd>
-      <dt>Versión</dt><dd>${esc(f.version)}</dd>
-      <dt>Forma</dt><dd>${esc(f.form || '—')}</dd>
-      <dt>Lote de referencia</dt><dd>${fmtNum(f.target_amount)} ${esc(f.unit)}</dd>
-      <dt>Referencia</dt><dd>${esc(f.reference || '—')}</dd>
-    </dl>
-  </div>
-  <section><h2>Composición</h2><ul class="list">${(f.components || []).map((c) => `<li><div class="row"><span class="row-main">${esc(c.ingredient)}</span><b class="num">${fmtNum(c.amount)} ${esc(c.unit)}</b></div></li>`).join('')}</ul></section>
-  ${f.status === 'aprobada' ? `<p><a class="btn block" href="#elaboraciones--nueva--${esc(f.uuid)}">Elaborar con esta fórmula</a></p>` : ''}
-  <section><h2>Cambiar estado</h2><div class="actions">${Object.keys(STATUS.formula).map((s) => `<button class="btn ${s === f.status ? '' : 'secondary'}" data-act="setStatus" data-store="formula" data-id="${esc(f.uuid)}" data-status="${s}" ${s === f.status ? 'disabled' : ''}>${STATUS.formula[s]}</button>`).join('')}</div>
-  <p class="hint">Solo las fórmulas aprobadas aparecen al crear una elaboración.</p></section>`;
-}
-
-function componentRow() {
-  return `<div class="comp" data-comp>
-    <input type="text" name="ingredient" list="dl-materials" placeholder="Ingrediente" aria-label="Ingrediente" maxlength="160">
-    <input type="text" name="amount" inputmode="decimal" autocomplete="off" placeholder="Cantidad" aria-label="Cantidad">
-    <select name="cunit" aria-label="Unidad">${options(COMPONENT_UNITS, 'g')}</select>
-    <button type="button" class="icon-btn quiet" data-act="removeComponent" aria-label="Quitar componente">${ICON.x}</button>
-  </div>`;
-}
-async function viewFormulaForm() {
-  const names = [...new Set((await getAll('material')).map((m) => m.name))].sort((a, b) => a.localeCompare(b, 'es'));
-  return `<form class="form" data-form="formula" novalidate>
-    ${formMsg()}
-    ${field('Nombre', text('name', 'required maxlength="160"'))}
-    <div class="grid2">
-      ${field('Código', text('code', 'maxlength="80"'))}
-      ${field('Versión', text('version', 'value="1" maxlength="30"'))}
-    </div>
-    ${field('Forma farmacéutica', text('form', 'maxlength="80"'))}
-    <div class="grid2">
-      ${field('Lote de referencia', decimal('target_amount', 'value="100" required'))}
-      ${field('Unidad', `<select name="unit">${options(FORMULA_UNITS, 'g')}</select>`)}
-    </div>
-    ${field('Referencia bibliográfica o normativa', text('reference', 'maxlength="200"'))}
-    <fieldset class="comps"><legend>Composición para el lote de referencia</legend>
-      <div data-comps>${componentRow()}${componentRow()}</div>
-      <button type="button" class="btn secondary small" data-act="addComponent">${ICON.plus}Añadir componente</button>
-    </fieldset>
-    <datalist id="dl-materials">${names.map((n) => `<option value="${esc(n)}">`).join('')}</datalist>
-    ${field('Estado', `<select name="status">${options(Object.keys(STATUS.formula), 'borrador', STATUS.formula)}</select>`)}
-    <button class="btn block" type="submit">Guardar fórmula</button>
-  </form>`;
-}
-
-// ------------------------------------------------------------------ Elaboraciones
-async function viewProductions() {
-  const items = (await getAll('production')).sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
-  const list = items.length
-    ? `<ul class="list" data-list>${items.map((p) => `<li data-text="${esc(lc([p.record_code, p.formula_name, p.patient_ref].join(' ')))}"><a class="row" href="#elaboraciones--${esc(p.uuid)}"><div class="row-main"><strong>${esc(p.record_code)}</strong><span class="sub"><span>${esc(p.formula_name)}</span><span>${fmtNum(p.target_amount)} ${esc(p.unit)}</span><span>${esc(fmtStamp(p.created_at).slice(0, 10))}</span></span></div>${pill('production', p.status)}</a></li>`).join('')}</ul><p class="none" data-none hidden>Ninguna elaboración coincide con la búsqueda.</p>`
-    : empty('Aún no hay elaboraciones.', 'Crea una con «Nueva elaboración» a partir de una fórmula aprobada.');
-  return `${items.length ? searchBox('Buscar código o fórmula') : ''}${list}${fab('#elaboraciones--nueva', 'Nueva elaboración')}`;
-}
-
-async function suggestRecordCode() {
-  const day = todayIso().replaceAll('-', '');
-  const prods = await getAll('production');
-  const prefix = `E-${day}-`;
-  let n = prods.filter((p) => String(p.record_code).startsWith(prefix)).length + 1;
-  const used = new Set(prods.map((p) => lc(p.record_code)));
-  while (used.has(lc(`${prefix}${pad2(n)}`))) n += 1;
-  return `${prefix}${pad2(n)}`;
-}
-
-async function viewProductionNew(preselect) {
-  const formulas = (await getAll('formula')).filter((f) => f.status === 'aprobada').sort(byText('name'));
-  state.formulaCache = Object.fromEntries(formulas.map((f) => [f.uuid, f]));
-  if (!formulas.length) {
-    return `<div class="empty"><strong>No hay fórmulas aprobadas.</strong>Solo se puede elaborar a partir de una fórmula en estado Aprobada.<a class="btn secondary small" href="#formulas">Ir a Fórmulas</a></div>`;
-  }
-  const code = await suggestRecordCode();
-  return `<form class="form" data-form="productionNew" novalidate>
-    ${formMsg()}
-    ${field('Fórmula aprobada', `<select name="formula_uuid" required>${formulas.map((f) => `<option value="${esc(f.uuid)}"${f.uuid === preselect ? ' selected' : ''}>${esc(f.code ? `${f.code} ` : '')}${esc(f.name)} (v${esc(f.version)})</option>`).join('')}</select>`)}
-    <div class="grid2">
-      ${field('Cantidad final', decimal('target_amount', 'required'))}
-      ${field('Unidad', '<input type="text" name="unit_view" readonly tabindex="-1">')}
-    </div>
-    ${field('Código de elaboración', text('record_code', `value="${esc(code)}" required maxlength="80"`), 'Puedes cambiarlo. No puede repetirse.')}
-    ${field('Referencia de paciente', text('patient_ref', 'maxlength="100"'), 'Opcional. Usa un código interno, no nombres ni datos identificativos.')}
-    ${field('Observaciones', '<textarea name="notes" maxlength="2000"></textarea>')}
-    <section><h2>Cantidades teóricas</h2><div id="preview"></div>
-    <p class="hint">Escalado proporcional de la composición aprobada. No contempla densidad, mermas, sobrellenado ni conversiones de unidades.</p></section>
-    <button class="btn block" type="submit">Crear registro</button>
-  </form>`;
-}
-function updatePreview(form) {
-  const f = state.formulaCache[form.formula_uuid.value];
-  const box = $('#preview');
-  if (!f || !box) return;
-  form.unit_view.value = f.unit;
-  let target = null;
-  try { target = parseNum(form.target_amount.value, 'Cantidad final'); } catch { target = null; }
-  if (!target || target <= 0 || !(f.target_amount > 0)) {
-    box.innerHTML = `<p class="hint">Escribe la cantidad final para ver las cantidades de cada componente (la fórmula está definida para ${fmtNum(f.target_amount)} ${esc(f.unit)}).</p>`;
-    return;
-  }
-  const factor = target / f.target_amount;
-  box.innerHTML = `<ul class="list">${(f.components || []).map((c) => `<li><div class="row"><span class="row-main">${esc(c.ingredient)}</span><b class="num">${fmtNum(round6(c.amount * factor))} ${esc(c.unit)}</b></div></li>`).join('')}</ul>`;
-}
-
-async function viewProduction(id) {
-  const p = await getOne('production', id);
-  if (!p) return empty('Este registro no existe.', '');
-  state.materials = await getAll('material');
-  const editable = p.status === 'borrador';
-  const ws = p.weighings || [];
-  const done = ws.filter((w) => isNum(w.actual) && w.material_lot).length;
-  const header = `<div class="panel">
-    <div class="head-row"><h2 class="big">${esc(p.record_code)}</h2>${pill('production', p.status)}</div>
-    <dl class="facts">
-      <dt>Fórmula</dt><dd>${esc(p.formula_name)} (versión ${esc(p.formula_version)})</dd>
-      <dt>Cantidad final</dt><dd>${fmtNum(p.target_amount)} ${esc(p.unit)}</dd>
-      <dt>Operador</dt><dd>${esc(p.operator)}</dd>
-      <dt>Creado</dt><dd>${esc(fmtStamp(p.created_at))}</dd>
-      ${p.patient_ref ? `<dt>Ref. paciente</dt><dd>${esc(p.patient_ref)}</dd>` : ''}
-      ${p.submitted_at ? `<dt>Enviado</dt><dd>${esc(fmtStamp(p.submitted_at))}</dd>` : ''}
-    </dl>
-  </div>
-  <div class="progress"><progress max="${ws.length}" value="${done}"></progress><span>${done} de ${ws.length} pesadas completas</span></div>`;
-
-  const blocks = ws.map((w, i) => {
-    const lots = state.materials.filter((m) => lc(m.name) === lc(w.ingredient));
-    return `<div class="weigh" role="group" aria-labelledby="w${i}">
-      <h3 id="w${i}">${esc(w.ingredient)}</h3>
-      <div class="readouts">
-        <div class="readout"><span>Teórico</span><div class="display theo"><span class="v">${fmtNum(w.theoretical)}</span><span class="u">${esc(w.unit)}</span></div></div>
-        <label class="readout"><span>Real pesado</span><div class="display">${editable
-          ? `<input class="display-input" type="text" inputmode="decimal" autocomplete="off" name="actual_${i}" value="${esc(inputNum(w.actual))}" data-weigh-actual="${i}" data-theo="${w.theoretical}" aria-label="Cantidad real pesada de ${esc(w.ingredient)}">`
-          : `<span class="v">${fmtNum(w.actual)}</span>`}<span class="u">${esc(w.unit)}</span></div></label>
-      </div>
-      <p class="dev" data-dev="${i}"></p>
-      ${editable
-        ? `<label class="field"><span>Lote de materia prima</span><input type="text" name="lot_${i}" maxlength="100" list="lots${i}" value="${esc(w.material_lot || '')}" data-weigh-lot="${i}" data-ingredient="${esc(w.ingredient)}" autocomplete="off"></label>
-           <datalist id="lots${i}">${lots.map((m) => `<option value="${esc(m.lot)}">${esc(`${STATUS.material[m.status] || m.status}${isDay(m.expiry) ? `, cad. ${fmtDay(m.expiry)}` : ''}`)}</option>`).join('')}</datalist>
-           <p class="lotwarn" data-lotwarn="${i}"></p>`
-        : `<p class="lot-ro">Lote: <strong>${esc(w.material_lot || '—')}</strong></p>`}
-    </div>`;
-  }).join('');
-
-  if (!editable) {
-    return `${header}<div class="weighs">${blocks}</div>
-      ${p.notes ? `<section><h2>Observaciones</h2><div class="panel pre">${esc(p.notes)}</div></section>` : ''}
-      <p class="msg ok">Enviado a revisión farmacéutica. No implica liberación del preparado.</p>`;
-  }
-  return `${header}
-  <form class="form" data-form="weighings" data-id="${esc(p.uuid)}" novalidate>
-    ${formMsg()}
-    <div class="weighs">${blocks}</div>
-    ${field('Observaciones', `<textarea name="notes" maxlength="2000">${esc(p.notes || '')}</textarea>`)}
-    <button class="btn block" type="submit" name="intent" value="save">Guardar pesadas</button>
-    <button class="btn secondary block" type="submit" name="intent" value="submit">Enviar a revisión</button>
-    <p class="hint">Al enviarlo a revisión ya no se podrán cambiar las pesadas. El envío no libera ni autoriza el preparado.</p>
-  </form>`;
-}
-function updateDeviation(input) {
-  const out = $(`[data-dev="${input.dataset.weighActual}"]`);
-  if (!out) return;
-  const theo = Number(input.dataset.theo);
-  let v = null;
-  try { v = parseNum(input.value, 'Real'); } catch { out.textContent = 'Número no válido'; out.className = 'dev bad'; return; }
-  if (v === null || !(theo > 0)) { out.textContent = ''; out.className = 'dev'; return; }
-  if (round6(v - theo) === 0) { out.textContent = 'Coincide con el teórico'; out.className = 'dev'; return; }
-  const pct = ((v - theo) / theo) * 100;
-  out.textContent = `Diferencia ${v - theo >= 0 ? '+' : '−'}${fmtNum(round6(Math.abs(v - theo)))} (${pct >= 0 ? '+' : '−'}${Math.abs(pct).toLocaleString('es-ES', { maximumFractionDigits: 2 })} %)`;
-  out.className = 'dev';
-}
-function updateLotWarning(input) {
-  const out = $(`[data-lotwarn="${input.dataset.weighLot}"]`);
-  if (!out) return;
-  const lot = lc(str(input.value));
-  if (!lot) { out.textContent = ''; return; }
-  const matches = state.materials.filter((m) => lc(m.lot) === lot);
-  const sameName = matches.filter((m) => lc(m.name) === lc(input.dataset.ingredient));
-  const warnings = [];
-  if (!matches.length) warnings.push('Este lote no está registrado en Materias primas.');
-  else if (!sameName.length) warnings.push(`Ese lote está registrado para ${matches.map((m) => m.name).join(', ')}.`);
-  for (const m of sameName.length ? sameName : matches) {
-    if (m.status !== 'aceptado') warnings.push(`Lote en estado ${lc(STATUS.material[m.status] || m.status)}.`);
-    if (isDay(m.expiry) && daysUntil(m.expiry) < 0) warnings.push(`Lote caducado el ${fmtDay(m.expiry)}.`);
-  }
-  out.textContent = [...new Set(warnings)].join(' ');
-}
-
-// ------------------------------------------------------------------ PNT
-const latestFirst = (a, b) => String(b.created_at).localeCompare(String(a.created_at));
-
-async function viewPnts() {
-  const items = (await getAll('pnt')).sort(byText('code'));
-  const latest = {};
-  (await getAll(FILE_STORE)).sort(latestFirst).forEach((f) => { if (!latest[f.pnt_uuid]) latest[f.pnt_uuid] = f; });
-  const list = items.length
-    ? `<ul class="list" data-list>${items.map((p) => {
-      const overdue = p.status === 'vigente' && isDay(p.review_date) && daysUntil(p.review_date) < 0;
-      const doc = latest[p.uuid];
-      return `<li data-text="${esc(lc([p.code, p.title, p.category, p.file_note].join(' ')))}"><a class="row" href="#pnt--${esc(p.uuid)}"><div class="row-main"><strong><span class="code">${esc(p.code)}</span> ${esc(p.title)}</strong><span class="sub">${p.category ? `<span>${esc(p.category)}</span>` : ''}<span>Versión ${esc(p.version)}</span><span>Revisión ${fmtDay(p.review_date)}</span>${overdue ? '<span class="bad">Revisión vencida</span>' : ''}</span><span class="sub">${doc ? `<span class="doc-tag">${esc(DOC_TYPES[doc.ext].label)}</span>` : '<span>Sin documento</span>'}</span></div>${pill('pnt', p.status)}</a></li>`;
-    }).join('')}</ul><p class="none" data-none hidden>Ningún PNT coincide con la búsqueda.</p>`
-    : empty('Aún no hay PNT registrados.', 'Registra el primero con «Nuevo PNT».');
-  return `${items.length ? searchBox('Buscar código, título o categoría') : ''}${list}${fab('#pnt--nuevo', 'Nuevo PNT')}`;
-}
-
-const filePicker = (label) => `<div class="filepick">
-    <label class="btn secondary">${esc(label)}<input type="file" name="file" accept="${DOC_ACCEPT}" data-docpick hidden></label>
-    <p class="hint" data-file-chosen>Ningún archivo elegido</p>
-  </div>`;
-
-function docRow(f, current) {
-  return `<li><a class="row" href="#documento--${esc(f.uuid)}"><div class="row-main"><strong>${esc(f.name)}</strong><span class="sub"><span class="doc-tag">${esc(DOC_TYPES[f.ext].label)}</span><span>Versión ${esc(f.version)}</span><span>${esc(fmtStamp(f.created_at).slice(0, 10))}</span><span>${fmtSize(f.size)}</span></span></div>${current ? '<span class="pill green">Vigente</span>' : ''}</a></li>`;
-}
-
-async function viewPnt(id) {
-  const p = await getOne('pnt', id);
-  if (!p) return empty('Este PNT no existe.', 'Puede que el enlace no sea correcto.');
-  const docs = (await filesOf(id)).sort(latestFirst);
-  const [current, ...older] = docs;
-  const overdue = p.status === 'vigente' && isDay(p.review_date) && daysUntil(p.review_date) < 0;
-  const canShare = current && current.ext === 'pdf' && navigator.canShare
-    && navigator.canShare({ files: [new File([''], 'x.pdf', { type: 'application/pdf' })] });
-  return `<div class="panel">
-    <div class="head-row"><h2 class="big"><span class="code">${esc(p.code)}</span> ${esc(p.title)}</h2>${pill('pnt', p.status)}</div>
-    <dl class="facts">
-      <dt>Versión</dt><dd>${esc(p.version)}</dd>
-      <dt>Categoría</dt><dd>${esc(p.category || '—')}</dd>
-      <dt>En vigor desde</dt><dd>${fmtDay(p.effective_date)}</dd>
-      <dt>Próxima revisión</dt><dd>${fmtDay(p.review_date)}${overdue ? ' <span class="bad">vencida</span>' : ''}</dd>
-      <dt>Ubicación</dt><dd>${esc(p.file_note || '—')}</dd>
-    </dl>
-  </div>
-  <section><h2>Documento</h2>
-  ${current
-    ? `<ul class="list">${docRow(current, true)}</ul>
-       <div class="actions spaced">
-         <a class="btn" href="#documento--${esc(current.uuid)}">Ver documento</a>
-         <button class="btn secondary" data-act="downloadDoc" data-id="${esc(current.uuid)}">Descargar</button>
-         ${canShare ? `<button class="btn secondary" data-act="shareDoc" data-id="${esc(current.uuid)}">Abrir con otra app</button>` : ''}
-       </div>`
-    : empty('Este PNT aún no tiene documento.', 'Súbelo en PDF o Word para consultarlo desde aquí, también sin conexión.')}
-  </section>
-  <section><h2>${current ? 'Subir una versión nueva' : 'Subir documento'}</h2>
-  <form class="panel form" data-form="pntDoc" data-id="${esc(p.uuid)}" novalidate>
-    ${formMsg()}
-    ${filePicker('Elegir PDF o Word')}
-    <div class="grid2">
-      ${field('Versión del PNT', text('version', `value="${esc(p.version)}" maxlength="30"`))}
-      ${field('En vigor desde', `<input type="date" name="effective_date" value="${isDay(p.effective_date) ? p.effective_date : ''}">`)}
-    </div>
-    ${field('Próxima revisión', `<input type="date" name="review_date" value="${isDay(p.review_date) ? p.review_date : ''}">`)}
-    <button class="btn block" type="submit">Guardar documento</button>
-    <p class="hint">Máximo 25 MB. Se guarda en este teléfono y entra en las copias de seguridad.${current ? ' El documento actual pasará a versiones anteriores; no se borra.' : ''}</p>
-  </form></section>
-  ${older.length ? `<section><h2>Versiones anteriores</h2><ul class="list">${older.map((f) => docRow(f, false)).join('')}</ul></section>` : ''}
-  <section><h2>Cambiar estado</h2><div class="actions">${Object.keys(STATUS.pnt).map((s) => `<button class="btn ${s === p.status ? '' : 'secondary'}" data-act="setStatus" data-store="pnt" data-id="${esc(p.uuid)}" data-status="${s}" ${s === p.status ? 'disabled' : ''}>${STATUS.pnt[s]}</button>`).join('')}</div></section>`;
-}
-
-function viewPntForm() {
-  return `<form class="form" data-form="pnt" novalidate>
-    ${formMsg()}
-    <div class="grid2">
-      ${field('Código', text('code', 'required maxlength="80"'))}
-      ${field('Versión', text('version', 'value="1" maxlength="30"'))}
-    </div>
-    ${field('Título', text('title', 'required maxlength="180"'))}
-    ${field('Categoría', text('category', 'maxlength="100"'))}
-    <div class="grid2">
-      ${field('Entrada en vigor', '<input type="date" name="effective_date">')}
-      ${field('Próxima revisión', '<input type="date" name="review_date">')}
-    </div>
-    <div class="field"><span>Documento (opcional)</span>${filePicker('Elegir PDF o Word')}</div>
-    ${field('Ubicación del original', text('file_note', 'maxlength="500"'), 'Dónde está el documento en papel: carpeta, archivador...')}
-    ${field('Estado', `<select name="status">${options(Object.keys(STATUS.pnt), 'borrador', STATUS.pnt)}</select>`)}
-    <button class="btn block" type="submit">Guardar PNT</button>
-  </form>`;
-}
-
-/** Comprueba el contenido real del archivo (no solo la extensión). */
-async function sniffDoc(file) {
-  const head = new Uint8Array(await file.slice(0, 1024).arrayBuffer());
-  const ext = String(file.name.split('.').pop() || '').toLowerCase();
-  const starts = (sig) => sig.every((b, i) => head[i] === b);
-  const pdfAt = new TextDecoder('latin1').decode(head).indexOf('%PDF-');
-  if (pdfAt !== -1) return 'pdf';
-  if (ext === 'docx' && starts([0x50, 0x4b, 0x03, 0x04])) return 'docx';
-  if (ext === 'doc' && starts([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1])) return 'doc';
-  return null;
-}
-async function buildDocRecord(file, pnt, existing, version) {
-  if (!file.size) throw new InputError('El archivo está vacío.');
-  if (file.size > MAX_DOC_BYTES) throw new InputError(`El archivo ocupa ${fmtSize(file.size)}. El máximo es 25 MB.`);
-  const ext = await sniffDoc(file);
-  if (!ext) throw new InputError('Solo se admiten documentos PDF (.pdf) o Word (.docx o .doc).');
-  const buf = await file.arrayBuffer();
-  const sha256 = toHex(await crypto.subtle.digest('SHA-256', buf));
-  if (existing.some((f) => f.sha256 === sha256)) throw new InputError('Ese mismo archivo ya está guardado en este PNT.');
-  return {
-    uuid: newId(), pnt_uuid: pnt.uuid, name: file.name.slice(0, 200), ext, mime: DOC_TYPES[ext].mime,
-    size: file.size, version: version || '1', sha256, uploaded_by: state.profile.name,
-    blob: new Blob([buf], { type: DOC_TYPES[ext].mime }),
-  };
-}
-
-// ------------------------------------------------------------------ visor de documentos
-async function viewDocument(id) {
-  const doc = await getOne(FILE_STORE, id);
-  if (!doc) return empty('Este documento no existe.', '');
-  const p = await getOne('pnt', doc.pnt_uuid);
-  state.parent = `#pnt--${doc.pnt_uuid}`;
-  const canShare = doc.ext === 'pdf' && navigator.canShare
-    && navigator.canShare({ files: [new File([''], 'x.pdf', { type: 'application/pdf' })] });
-  return `<div class="doc-head">
-    <strong>${esc(p ? `${p.code} ${p.title}` : doc.name)}</strong>
-    <span class="sub"><span>${esc(doc.name)}</span><span>Versión ${esc(doc.version)}</span><span>${fmtSize(doc.size)}</span></span>
-    <div class="actions">
-      <button class="btn secondary small" data-act="downloadDoc" data-id="${esc(doc.uuid)}">Descargar</button>
-      ${canShare ? `<button class="btn secondary small" data-act="shareDoc" data-id="${esc(doc.uuid)}">Abrir con otra app</button>` : ''}
-    </div>
-  </div>
-  <div id="docview" class="docview" data-id="${esc(doc.uuid)}"><p class="hint">Abriendo el documento...</p></div>`;
-}
-
-async function renderDocument(container) {
-  const doc = await getOne(FILE_STORE, container.dataset.id);
-  if (!doc || !container.isConnected) return;
-  try {
-    if (doc.ext === 'pdf') await renderPdf(container, doc);
-    else if (doc.ext === 'docx') await renderDocx(container, doc);
-    else {
-      container.innerHTML = `<div class="msg warn">Los documentos .doc (Word 97-2003) no se pueden mostrar dentro de la app. Pulsa «Descargar» para abrirlo con Word, o guárdalo como .docx o PDF y súbelo de nuevo.</div>`;
-    }
-  } catch (err) {
-    console.error(err);
-    if (container.isConnected) {
-      container.innerHTML = `<div class="msg error">No se ha podido mostrar el documento (${esc(err && err.message ? err.message : err)}). Puedes descargarlo y abrirlo con otra app.</div>`;
-    }
-  }
-}
-
-const vendorUrl = (path) => new URL(`vendor/${path}`, document.baseURI).href;
-let pdfjsPromise = null;
-function loadPdfJs() {
-  if (!pdfjsPromise) {
-    pdfjsPromise = import(vendorUrl('pdfjs/pdf.min.mjs')).then((lib) => {
-      lib.GlobalWorkerOptions.workerSrc = vendorUrl('pdfjs/pdf.worker.min.mjs');
-      return lib;
-    }).catch((err) => { pdfjsPromise = null; throw err; });
-  }
-  return pdfjsPromise;
-}
-
-async function renderPdf(container, doc) {
-  const pdfjs = await loadPdfJs();
-  const pdf = await pdfjs.getDocument({
-    data: new Uint8Array(await doc.blob.arrayBuffer()),
-    standardFontDataUrl: vendorUrl('pdfjs/standard_fonts/'),
-    wasmUrl: vendorUrl('pdfjs/wasm/'),
-    iccUrl: vendorUrl('pdfjs/iccs/'),
-    isEvalSupported: false,
-    enableXfa: false,
-  }).promise;
-  if (!container.isConnected) { pdf.destroy(); return; }
-  container.innerHTML = `<p class="hint pages">${pdf.numPages} ${pdf.numPages === 1 ? 'página' : 'páginas'}. Pellizca para ampliar.</p>`;
-  const width = container.clientWidth || 360;
-  const dpr = Math.min(window.devicePixelRatio || 1, 3);
-  const slots = [];
-  for (let n = 1; n <= pdf.numPages; n += 1) {
-    const page = await pdf.getPage(n);
-    const base = page.getViewport({ scale: 1 });
-    const slot = document.createElement('div');
-    slot.className = 'pdf-page';
-    slot.style.aspectRatio = `${base.width} / ${base.height}`;
-    slot.dataset.page = String(n);
-    slot.setAttribute('aria-label', `Página ${n}`);
-    container.append(slot);
-    slots.push({ slot, page, base });
-  }
-  // Cada página se pinta al acercarse a la pantalla y se guarda como imagen: así no se agota la memoria del móvil.
-  const paint = async ({ slot, page, base }) => {
-    if (slot.dataset.done) return;
-    slot.dataset.done = '1';
-    let scale = (width / base.width) * dpr * 1.5;
-    const maxPixels = 6e6;
-    if (base.width * base.height * scale * scale > maxPixels) scale = Math.sqrt(maxPixels / (base.width * base.height));
-    const viewport = page.getViewport({ scale });
-    const canvas = document.createElement('canvas');
-    canvas.width = Math.floor(viewport.width);
-    canvas.height = Math.floor(viewport.height);
-    const ctx = canvas.getContext('2d');
-    await page.render({ canvasContext: ctx, canvas, viewport }).promise;
-    const blob = await new Promise((res) => canvas.toBlob(res, 'image/png'));
-    canvas.width = 0; canvas.height = 0;
-    if (!slot.isConnected || !blob) return;
-    const url = URL.createObjectURL(blob);
-    state.objectUrls.push(url);
-    const img = document.createElement('img');
-    img.src = url;
-    img.alt = `Página ${slot.dataset.page}`;
-    slot.append(img);
-  };
-  const observer = new IntersectionObserver((entries) => {
-    entries.forEach((e) => {
-      if (!e.isIntersecting) return;
-      observer.unobserve(e.target);
-      const item = slots.find((x) => x.slot === e.target);
-      if (item) paint(item).catch((err) => console.error(err));
-    });
-  }, { rootMargin: '800px 0px' });
-  slots.forEach(({ slot }) => observer.observe(slot));
-}
-
-let mammothPromise = null;
-function loadMammoth() {
-  if (!mammothPromise) {
-    mammothPromise = new Promise((resolve, reject) => {
-      if (window.mammoth) { resolve(window.mammoth); return; }
-      const script = document.createElement('script');
-      script.src = vendorUrl('mammoth/mammoth.browser.min.js');
-      script.onload = () => resolve(window.mammoth);
-      script.onerror = () => { mammothPromise = null; reject(new Error('no se pudo cargar el lector de Word')); };
-      document.head.append(script);
-    });
-  }
-  return mammothPromise;
-}
-
-async function renderDocx(container, doc) {
-  const mammoth = await loadMammoth();
-  const result = await mammoth.convertToHtml({ arrayBuffer: await doc.blob.arrayBuffer() });
-  if (!container.isConnected) return;
-  const article = document.createElement('article');
-  article.className = 'docx';
-  article.append(sanitizeDocHtml(result.value));
-  container.innerHTML = '<p class="hint pages">Vista de lectura: se muestra el texto, las tablas y las imágenes; el diseño de página puede diferir del original.</p>';
-  container.append(article);
-}
-
-/** Deja solo etiquetas de texto seguras del HTML generado a partir del Word. */
-function sanitizeDocHtml(html) {
-  const tpl = document.createElement('template');
-  tpl.innerHTML = html;
-  const allowed = new Set(['P', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'STRONG', 'B', 'EM', 'I', 'U', 'S', 'SUB', 'SUP', 'BR',
-    'UL', 'OL', 'LI', 'TABLE', 'THEAD', 'TBODY', 'TR', 'TD', 'TH', 'A', 'IMG', 'SPAN', 'BLOCKQUOTE', 'PRE', 'CODE']);
-  const drop = new Set(['SCRIPT', 'STYLE', 'IFRAME', 'OBJECT', 'EMBED', 'LINK', 'META', 'FORM', 'INPUT', 'BUTTON', 'SVG', 'MATH']);
-  [...tpl.content.querySelectorAll('*')].forEach((el) => {
-    if (drop.has(el.tagName)) { el.remove(); return; }
-    if (!allowed.has(el.tagName)) { el.replaceWith(...el.childNodes); return; }
-    [...el.attributes].forEach((a) => {
-      const name = a.name.toLowerCase();
-      const keep = (el.tagName === 'A' && name === 'href' && /^(https?:|mailto:|#)/i.test(a.value))
-        || (el.tagName === 'IMG' && name === 'src' && /^data:image\/(png|jpe?g|gif|webp|bmp);/i.test(a.value))
-        || (el.tagName === 'IMG' && name === 'alt')
-        || ((el.tagName === 'TD' || el.tagName === 'TH') && (name === 'colspan' || name === 'rowspan') && /^\d{1,3}$/.test(a.value));
-      if (!keep) el.removeAttribute(a.name);
-    });
-    if (el.tagName === 'A' && el.hasAttribute('href')) { el.target = '_blank'; el.rel = 'noopener noreferrer'; }
-    if (el.tagName === 'TABLE') {
-      const wrap = document.createElement('div');
-      wrap.className = 'table-scroll';
-      el.replaceWith(wrap);
-      wrap.append(el);
-    }
-  });
-  return tpl.content;
-}
-
 // ------------------------------------------------------------------ Ajustes, copias y actividad
+const lotPreview = (s, n) => `${new Date().getFullYear()}-${s.lot.letter || 'J'}-${pad2(new Date().getMonth() + 1)}-FM-${n}`;
+
 async function viewSettings() {
+  const s = await loadSettings();
   const backup = await backupStatus();
   const docs = await getAll(FILE_STORE);
   const docBytes = docs.reduce((n, f) => n + (f.size || 0), 0);
@@ -1071,6 +731,7 @@ async function viewSettings() {
   const probe = new File(['{}'], 'copia.json', { type: 'application/json' });
   const canShare = Boolean(navigator.canShare && navigator.canShare({ files: [probe] }));
   const standalone = matchMedia('(display-mode: standalone)').matches;
+  const ph = s.pharmacy;
   return `<section><h2>Copia de seguridad</h2><div class="panel stack">
       <p>Tus datos solo están en este teléfono. Si se pierde, se rompe o se borran los datos de Chrome, solo se podrán recuperar con una copia.</p>
       <p><strong>Última copia:</strong> ${backup.lastExport ? esc(fmtStamp(backup.lastExport)) : 'ninguna todavía'}${backup.remind ? ' <span class="bad">(hay cambios sin copiar)</span>' : ''}</p>
@@ -1079,9 +740,43 @@ async function viewSettings() {
         ${canShare ? '<button class="btn secondary" data-act="share">Compartir copia</button>' : ''}
         <label class="btn secondary">Importar copia<input type="file" accept=".json,application/json" data-import hidden></label>
       </div>
-      ${docs.length ? `<p class="hint">La copia incluye ${docs.length} ${docs.length === 1 ? 'documento' : 'documentos'} de PNT (${fmtSize(docBytes)}), así que ocupará algo más.</p>` : ''}
+      ${docs.length ? `<p class="hint">La copia incluye ${docs.length} ${docs.length === 1 ? 'documento adjunto' : 'documentos adjuntos'} (${fmtSize(docBytes)}), así que ocupará algo más.</p>` : ''}
       <p class="hint">La copia es un archivo .json que se guarda en Descargas. Guárdalo también fuera del teléfono (correo, Drive o el PC). Importar añade los registros que no tengas y actualiza los que sean más recientes; no borra nada.</p>
     </div></section>
+  <form class="form" data-form="settings" novalidate>
+    ${formMsg()}
+    <section><h2>Farmacia (aparece en las etiquetas)</h2><div class="panel form">
+      ${field('Nombre de la oficina de farmacia', text('ph_name', `value="${esc(ph.name)}" maxlength="120"`))}
+      ${field('Dirección', text('ph_address', `value="${esc(ph.address)}" maxlength="200"`))}
+      <div class="grid2">
+        ${field('Teléfono', `<input type="tel" name="ph_phone" value="${esc(ph.phone)}" maxlength="40">`)}
+        ${field('Farmacéutico', text('ph_pharmacist', `value="${esc(ph.pharmacist)}" maxlength="120"`))}
+      </div>
+    </div></section>
+    <section><h2>Lotes de fórmulas</h2><div class="panel form">
+      <div class="grid2">
+        ${field('Letra', text('lot_letter', `value="${esc(s.lot.letter)}" maxlength="4"`))}
+        ${field('Próximo número', `<input type="text" inputmode="numeric" name="lot_next" value="${esc(s.lot.next)}" maxlength="7">`)}
+      </div>
+      <p class="hint">Formato [Año]-${esc(s.lot.letter || 'J')}-[Mes]-FM-[Número]. El número sigue siempre, sin reiniciarse. Próximo lote: <strong>${esc(lotPreview(s, s.lot.next))}</strong>.</p>
+    </div></section>
+    <section><h2>Etiquetas</h2><div class="panel form">
+      ${field('Formato en folio A4', `<select name="label_layout">${options(['8', '2'], s.label.layout, { 8: '8 etiquetas por folio (92 × 66 mm)', 2: '2 etiquetas por folio (190 × 135 mm)' })}</select>`)}
+      <label class="check"><input type="checkbox" name="label_all"${s.label.all_components ? ' checked' : ''}><span>Mostrar todos los componentes (si no, solo principios activos y excipientes de declaración obligatoria)</span></label>
+    </div></section>
+    <section><h2>Valoración de fórmulas</h2><div class="panel form">
+      <div class="grid2">
+        ${field('Factor P (€)', decimal('p_factor', `value="${esc(inputNum(s.pricing.p_factor))}"`))}
+        ${field('IVA (%)', decimal('iva', `value="${esc(inputNum(s.pricing.iva))}"`))}
+      </div>
+      <p class="hint">Honorarios del Anexo 3 del Convenio con la Comunidad de Madrid. El factor P se actualiza cada enero con el IPC (2026: 3,65 €).</p>
+    </div></section>
+    <section><h2>Utillaje y controles habituales</h2><div class="panel form">
+      ${field('Utillaje del laboratorio', `<textarea name="equipment" rows="6">${esc(s.equipment.join('\n'))}</textarea>`, 'Uno por línea. Se ofrece al registrar cada elaboración.')}
+      ${field('Pruebas de control de calidad', `<textarea name="qc_tests" rows="4">${esc(s.qc_tests.join('\n'))}</textarea>`, 'Una por línea. Aparecen en el control de calidad de cada elaboración.')}
+    </div></section>
+    <button class="btn block" type="submit">Guardar ajustes</button>
+  </form>
   <section><h2>Seguridad</h2><form class="panel form" data-form="changePin" novalidate autocomplete="off">
       ${formMsg()}
       ${field('PIN actual', '<input class="pin" type="password" name="current" inputmode="numeric" pattern="[0-9]*" maxlength="8">')}
@@ -1093,7 +788,7 @@ async function viewSettings() {
   <section><h2>Almacenamiento</h2><div class="panel stack">
       <p>${persisted === true ? 'Datos protegidos: Chrome no los borrará para liberar espacio.' : 'Datos sin protección permanente: si el teléfono se queda sin espacio, Chrome podría borrarlos.'} ${usage}</p>
       ${persisted === true ? '' : '<button class="btn secondary" data-act="persist">Proteger datos</button><p class="hint">Si Chrome no lo permite, instala primero la app en la pantalla de inicio y vuelve a intentarlo.</p>'}
-      ${standalone ? '<p class="hint">App instalada en el teléfono.</p>' : state.deferredInstall ? '<button class="btn secondary" data-act="install">Instalar en el teléfono</button>' : '<p class="hint">Para instalarla: menú de Chrome (⋮) y «Añadir a pantalla de inicio» o «Instalar aplicación».</p>'}
+      ${standalone ? '<p class="hint">App instalada en el teléfono.</p>' : state.deferredInstall ? '<button class="btn secondary" data-act="install">Instalar en el teléfono</button>' : '<p class="hint">Para instalarla: menú de Chrome (⋮) y «Instalar aplicación».</p>'}
     </div></section>
   <section><h2>Actividad</h2><ul class="list"><li><a class="row" href="#auditoria"><span class="row-main">Ver el registro de actividad</span></a></li></ul></section>
   <section><h2>Acerca de</h2><div class="panel"><dl class="facts">
@@ -1119,10 +814,11 @@ async function buildExport() {
     const { blob, ...meta } = f;
     datos[FILE_STORE].push({ ...meta, data: await blobToBase64(blob) });
   }
+  const ajustes = await loadSettings();
   return {
     formato: EXPORT_FORMAT, version_formato: EXPORT_FORMAT_VERSION,
     app: `FARMA·LAB móvil ${APP_VERSION}`, exportado: nowIso(),
-    dispositivo: state.deviceId, usuario: state.profile.name, datos,
+    dispositivo: state.deviceId, usuario: state.profile.name, ajustes, datos,
   };
 }
 function downloadBlob(blob, name) {
@@ -1155,31 +851,48 @@ async function exportBackup(share) {
 }
 
 const ID_RE = /^(?=.{8,64}$)[A-Za-z0-9]+(-[A-Za-z0-9]+)*$/;
-/** Documento de PNT de una copia: valida los datos y comprueba que el archivo llega íntegro (SHA-256). */
+const OWNER_TYPES = ['pnt', 'material', 'packaging', 'biblio'];
+/** Documento adjunto de una copia: valida los datos y comprueba que el archivo llega íntegro (SHA-256). */
 async function importedDoc(r) {
-  if (!r || typeof r !== 'object' || !ID_RE.test(String(r.uuid)) || !ID_RE.test(String(r.pnt_uuid))) return null;
+  if (!r || typeof r !== 'object' || !ID_RE.test(String(r.uuid))) return null;
+  const owner = r.owner_uuid || r.pnt_uuid;
+  if (!ID_RE.test(String(owner))) return null;
   if (typeof r.updated_at !== 'string' || typeof r.name !== 'string' || !DOC_TYPES[r.ext] || typeof r.data !== 'string') return null;
   if (!/^[0-9a-f]{64}$/.test(String(r.sha256)) || r.data.length > (MAX_DOC_BYTES * 4) / 3 + 8) return null;
   let bytes;
   try { bytes = base64ToBytes(r.data); } catch { return null; }
   if (toHex(await crypto.subtle.digest('SHA-256', bytes)) !== r.sha256) return null;
   const { data, ...meta } = r;
-  return { ...meta, name: meta.name.slice(0, 200), mime: DOC_TYPES[r.ext].mime, size: bytes.length, blob: new Blob([bytes], { type: DOC_TYPES[r.ext].mime }) };
+  return {
+    ...meta, owner_uuid: owner, owner_type: OWNER_TYPES.includes(r.owner_type) ? r.owner_type : 'pnt',
+    kind: DOC_KINDS[r.kind] ? r.kind : 'documento', name: meta.name.slice(0, 200), mime: DOC_TYPES[r.ext].mime,
+    size: bytes.length, blob: new Blob([bytes], { type: DOC_TYPES[r.ext].mime }),
+  };
 }
 function validRecord(store, r) {
   if (!r || typeof r !== 'object' || Array.isArray(r) || !ID_RE.test(String(r.uuid)) || typeof r.updated_at !== 'string') return false;
   const s = (v) => typeof v === 'string';
   const optNum = (v) => v === null || v === undefined || isNum(v);
   switch (store) {
-    case 'material': return s(r.name) && s(r.lot) && isNum(r.quantity);
+    case 'material': return s(r.name) && s(r.lot) && isNum(r.quantity) && optNum(r.min_stock);
+    case 'packaging': return s(r.name) && isNum(r.quantity) && optNum(r.min_stock);
     case 'formula': return s(r.name) && isNum(r.target_amount) && Array.isArray(r.components)
       && r.components.every((c) => c && s(c.ingredient) && isNum(c.amount));
     case 'pnt': return s(r.code) && s(r.title);
+    case 'biblio': return s(r.title);
     case 'production': return s(r.record_code) && isNum(r.target_amount) && Array.isArray(r.weighings)
       && r.weighings.every((w) => w && s(w.ingredient) && isNum(w.theoretical) && optNum(w.actual));
     case 'audit': return s(r.action);
     default: return false;
   }
+}
+/** Adapta registros de copias antiguas al formato actual. */
+function normalizeImported(store, r) {
+  if (store === 'production' && LEGACY_PRODUCTION_STATUS[r.status]) {
+    return { ...r, status: LEGACY_PRODUCTION_STATUS[r.status], status_changed_at: r.status_changed_at || r.submitted_at || r.updated_at };
+  }
+  if (store === 'production' && !STATUS.production[r.status]) return { ...r, status: 'en_proceso' };
+  return r;
 }
 async function importBackup(file) {
   if (file.size > 600 * 1048576) throw new InputError('El archivo es demasiado grande para ser una copia de FARMA·LAB.');
@@ -1197,8 +910,9 @@ async function importBackup(file) {
     const incoming = Array.isArray(payload.datos[s]) ? payload.datos[s] : [];
     const existing = new Map((await getAll(s)).map((r) => [r.uuid, r]));
     plan[s] = [];
-    for (const r of incoming) {
-      if (!validRecord(s, r)) { invalid += 1; continue; }
+    for (const raw of incoming) {
+      if (!validRecord(s, raw)) { invalid += 1; continue; }
+      const r = normalizeImported(s, raw);
       const cur = existing.get(r.uuid);
       if (!cur) { plan[s].push(r); added += 1; } else if (r.updated_at > (cur.updated_at || '')) { plan[s].push(r); updated += 1; } else same += 1;
     }
@@ -1214,13 +928,28 @@ async function importBackup(file) {
     plan[FILE_STORE].push(doc); docs += 1;
     if (cur) updated += 1; else added += 1;
   }
-  const summary = `Copia de ${payload.usuario || 'origen desconocido'} del ${fmtStamp(payload.exportado)}.\n\nRegistros nuevos: ${added}\nMás recientes que los tuyos: ${updated}${docs ? ` (incluye ${docs} ${docs === 1 ? 'documento' : 'documentos'} de PNT)` : ''}\nIguales o más antiguos (se ignoran): ${same}${invalid ? `\nNo válidos o dañados (se ignoran): ${invalid}` : ''}\n\nNo se borra nada de lo que ya tienes.`;
+  const local = await loadSettings();
+  const incomingSettings = payload.ajustes && typeof payload.ajustes === 'object' ? payload.ajustes : null;
+  let newSettings = null;
+  if (incomingSettings) {
+    const takeIncoming = String(incomingSettings.updated_at || '') > String(local.updated_at || '');
+    const merged = takeIncoming ? { ...local, ...incomingSettings, pharmacy: { ...local.pharmacy, ...(incomingSettings.pharmacy || {}) }, label: { ...local.label, ...(incomingSettings.label || {}) }, pricing: { ...local.pricing, ...(incomingSettings.pricing || {}) } } : { ...local };
+    const nextLot = Math.max(Number(local.lot.next) || 1, Number(incomingSettings.lot && incomingSettings.lot.next) || 1);
+    merged.lot = { ...(takeIncoming ? { ...local.lot, ...(incomingSettings.lot || {}) } : local.lot), next: nextLot };
+    if (!Array.isArray(merged.equipment)) merged.equipment = local.equipment;
+    if (!merged.pricing || !(isNum(merged.pricing.p_factor) && merged.pricing.p_factor > 0) || !(isNum(merged.pricing.iva) && merged.pricing.iva >= 0)) merged.pricing = local.pricing;
+    if (!Array.isArray(merged.qc_tests)) merged.qc_tests = local.qc_tests;
+    if (JSON.stringify(merged) !== JSON.stringify(local)) newSettings = merged;
+  }
+  const summary = `Copia de ${payload.usuario || 'origen desconocido'} del ${fmtStamp(payload.exportado)}.\n\nRegistros nuevos: ${added}\nMás recientes que los tuyos: ${updated}${docs ? ` (incluye ${docs} ${docs === 1 ? 'documento adjunto' : 'documentos adjuntos'})` : ''}\nIguales o más antiguos (se ignoran): ${same}${invalid ? `\nNo válidos o dañados (se ignoran): ${invalid}` : ''}${newSettings ? '\nTambién se actualizan los ajustes.' : ''}\n\nNo se borra nada de lo que ya tienes.`;
   if (!(await ask({ title: 'Importar copia', message: summary, confirmLabel: 'Importar' }))) return;
-  if (added + updated) {
+  if (added + updated || newSettings) {
     await tx([...STORES, FILE_STORE, 'meta'], 'readwrite', (t) => {
       for (const s of [...STORES, FILE_STORE]) plan[s].forEach((r) => t.objectStore(s).put(r));
+      if (newSettings) t.objectStore('meta').put(newSettings, 'settings');
       t.objectStore('meta').put(nowIso(), 'lastChange');
     });
+    if (newSettings) state.settings = newSettings;
   }
   await logOnly('importar_copia', `${file.name}: ${added} nuevos, ${updated} actualizados`);
   toast(added + updated ? `Importados: ${added} nuevos y ${updated} actualizados.` : 'La copia no tenía nada nuevo.');
@@ -1272,30 +1001,23 @@ const ACTIONS = {
     toast(ok ? 'Datos protegidos.' : 'Chrome no lo ha permitido todavía. Instala la app y vuelve a intentarlo.');
     await route();
   },
-  addComponent: () => {
-    $('[data-comps]').insertAdjacentHTML('beforeend', componentRow());
-    const rows = $$('[data-comp]');
-    $('input', rows[rows.length - 1]).focus();
-  },
-  removeComponent: (el) => {
-    const rows = $$('[data-comp]');
-    const row = el.closest('[data-comp]');
-    if (rows.length > 1) row.remove();
-    else $$('input', row).forEach((i) => { i.value = ''; });
-  },
+  wipe: () => wipeAll(),
   setStatus: async (el) => {
     const { store, id, status } = el.dataset;
-    if (!STATUS[store] || !STATUS[store][status]) return;
+    if (!STATUS_ACTIONS[store] || !STATUS[store][status]) return;
     const rec = await getOne(store, id);
-    if (!rec) return;
+    if (!rec || rec.status === status) return;
+    const check = STATUS_CHECKS[store] ? await STATUS_CHECKS[store](rec, status) : null;
+    if (check && !(await ask(check))) return;
     rec.status = status;
-    const label = store === 'material' ? `${rec.name} / ${rec.lot}` : store === 'pnt' ? `${rec.code} ${rec.title}` : `${rec.code || ''} ${rec.name}`.trim();
-    const action = { material: 'cambio_estado_materia_prima', formula: 'cambio_estado_formula', pnt: 'cambio_estado_pnt' }[store];
-    await save(store, rec, action, `${label}: ${STATUS[store][status]}`);
+    if ((store === 'material' || store === 'packaging') && ['aceptado', 'rechazado'].includes(status)) {
+      rec.decision_date = todayIso();
+      rec.decision_by = state.profile.name;
+    }
+    await save(store, rec, STATUS_ACTIONS[store], `${recordLabel(store, rec)}: ${STATUS[store][status]}`);
     toast(`Estado cambiado a ${STATUS[store][status]}.`);
     await route();
   },
-  wipe: () => wipeAll(),
   downloadDoc: async (el) => {
     const doc = await getOne(FILE_STORE, el.dataset.id);
     if (!doc) return;
@@ -1328,11 +1050,12 @@ async function onClick(e) {
   const handler = ACTIONS[el.dataset.act];
   if (!handler) return;
   e.preventDefault();
-  try { await handler(el, e); } catch (err) { reportError(err); }
+  try { await handler(el, e); } catch (err) { reportError(err, el.closest('form')); }
 }
 
 // ------------------------------------------------------------------ formularios
 const formData = (form) => Object.fromEntries(new FormData(form));
+const lines = (v) => String(v ?? '').split('\n').map((x) => x.trim()).filter(Boolean).map((x) => x.slice(0, 120)).slice(0, 80);
 
 const FORMS = {
   async setup(form) {
@@ -1369,156 +1092,6 @@ const FORMS = {
     await unlockDone();
   },
 
-  async material(form) {
-    const d = formData(form);
-    const name = str(d.name); const lot = str(d.lot); const code = str(d.code);
-    if (!name || !lot) throw new InputError('El nombre y el lote son obligatorios.');
-    const quantity = parseNum(d.quantity, 'Cantidad');
-    if (quantity === null) throw new InputError('Indica la cantidad.');
-    if (code && (await getAll('material')).some((m) => m.code && lc(m.code) === lc(code))) {
-      throw new InputError('Ya existe una materia prima con ese código. Usa otro código o déjalo en blanco.');
-    }
-    const rec = {
-      uuid: newId(), name: name.slice(0, 160), code: code.slice(0, 80) || null, lot: lot.slice(0, 100),
-      supplier: str(d.supplier).slice(0, 160), quantity,
-      unit: MATERIAL_UNITS.includes(d.unit) ? d.unit : 'g',
-      expiry: isDay(d.expiry) ? d.expiry : null,
-      status: STATUS.material[d.status] ? d.status : 'cuarentena',
-    };
-    await save('material', rec, 'alta_lote_materia_prima', `${rec.name} / ${rec.lot}`);
-    toast('Lote registrado.');
-    location.hash = '#materias';
-  },
-
-  async formula(form) {
-    const d = formData(form);
-    const all = new FormData(form);
-    const name = str(d.name);
-    if (!name) throw new InputError('Escribe el nombre de la fórmula.');
-    const target = parseNum(d.target_amount, 'Lote de referencia');
-    if (!target || target <= 0) throw new InputError('El lote de referencia debe ser mayor que cero.');
-    const ingredients = all.getAll('ingredient'); const amounts = all.getAll('amount'); const units = all.getAll('cunit');
-    const components = [];
-    ingredients.forEach((ing, i) => {
-      const n = str(ing);
-      if (!n && !str(amounts[i])) return;
-      if (!n) throw new InputError(`Falta el nombre del componente ${i + 1}.`);
-      const amount = parseNum(amounts[i], n);
-      if (amount === null || amount <= 0) throw new InputError(`Indica una cantidad mayor que cero para ${n}.`);
-      components.push({ ingredient: n.slice(0, 160), amount, unit: COMPONENT_UNITS.includes(units[i]) ? units[i] : 'g' });
-    });
-    if (!components.length) throw new InputError('Añade al menos un componente.');
-    const rec = {
-      uuid: newId(), name: name.slice(0, 160), code: str(d.code).slice(0, 80), version: str(d.version).slice(0, 30) || '1',
-      form: str(d.form).slice(0, 80), reference: str(d.reference).slice(0, 200), target_amount: target,
-      unit: FORMULA_UNITS.includes(d.unit) ? d.unit : 'g', status: STATUS.formula[d.status] ? d.status : 'borrador', components,
-    };
-    await save('formula', rec, 'alta_formula', `${rec.code} ${rec.name}`.trim());
-    toast('Fórmula guardada.');
-    location.hash = `#formulas--${rec.uuid}`;
-  },
-
-  async pnt(form) {
-    const d = formData(form);
-    const code = str(d.code); const title = str(d.title);
-    if (!code || !title) throw new InputError('El código y el título son obligatorios.');
-    if ((await getAll('pnt')).some((x) => lc(x.code) === lc(code))) throw new InputError('Ya existe un PNT con ese código.');
-    const rec = {
-      uuid: newId(), code: code.slice(0, 80), title: title.slice(0, 180), category: str(d.category).slice(0, 100),
-      version: str(d.version).slice(0, 30) || '1',
-      effective_date: isDay(d.effective_date) ? d.effective_date : null, review_date: isDay(d.review_date) ? d.review_date : null,
-      status: STATUS.pnt[d.status] ? d.status : 'borrador', file_note: str(d.file_note).slice(0, 500),
-    };
-    const file = form.elements.file && form.elements.file.files[0];
-    if (file) {
-      const doc = await buildDocRecord(file, rec, [], rec.version);
-      await saveMany([['pnt', rec], [FILE_STORE, doc]], 'alta_pnt', `${rec.code} ${rec.title} (con documento ${doc.name})`);
-    } else {
-      await save('pnt', rec, 'alta_pnt', `${rec.code} ${rec.title}`);
-    }
-    toast(file ? 'PNT registrado con su documento.' : 'PNT registrado.');
-    location.hash = `#pnt--${rec.uuid}`;
-  },
-
-  async pntDoc(form) {
-    const p = await getOne('pnt', form.dataset.id);
-    if (!p) throw new InputError('Este PNT ya no existe.');
-    const file = form.elements.file.files[0];
-    if (!file) throw new InputError('Elige un archivo PDF o Word.');
-    const version = str(form.elements.version.value).slice(0, 30) || p.version || '1';
-    const doc = await buildDocRecord(file, p, await filesOf(p.uuid), version);
-    p.version = version;
-    if (isDay(form.elements.effective_date.value)) p.effective_date = form.elements.effective_date.value;
-    if (isDay(form.elements.review_date.value)) p.review_date = form.elements.review_date.value;
-    await saveMany([['pnt', p], [FILE_STORE, doc]], 'alta_documento_pnt', `${p.code}: ${doc.name} (versión ${version})`);
-    toast('Documento guardado.');
-    await route();
-  },
-
-  async productionNew(form) {
-    const d = formData(form);
-    const code = str(d.record_code);
-    if (!code) throw new InputError('Escribe el código de elaboración.');
-    const f = await getOne('formula', d.formula_uuid);
-    if (!f || f.status !== 'aprobada') throw new InputError('Elige una fórmula aprobada.');
-    const target = parseNum(d.target_amount, 'Cantidad final');
-    if (!target || target <= 0) throw new InputError('La cantidad final debe ser mayor que cero.');
-    if (!(f.target_amount > 0)) throw new InputError('La fórmula no tiene un lote de referencia válido.');
-    if ((await getAll('production')).some((p) => lc(p.record_code) === lc(code))) {
-      throw new InputError('Ya existe un registro de elaboración con ese código.');
-    }
-    const factor = target / f.target_amount;
-    const rec = {
-      uuid: newId(), record_code: code.slice(0, 80), patient_ref: str(d.patient_ref).slice(0, 100),
-      formula_uuid: f.uuid, formula_code: f.code, formula_name: f.name, formula_version: f.version,
-      target_amount: target, unit: f.unit, operator: state.profile.name, status: 'borrador', notes: str(d.notes),
-      weighings: (f.components || []).map((c) => ({
-        uuid: newId(), ingredient: c.ingredient, theoretical: round6(c.amount * factor), actual: null, unit: c.unit, material_lot: '',
-      })),
-    };
-    await save('production', rec, 'crear_registro_elaboracion', rec.record_code);
-    toast('Registro creado. Completa las pesadas reales y los lotes.');
-    location.hash = `#elaboraciones--${rec.uuid}`;
-  },
-
-  async weighings(form, submitter) {
-    const rec = await getOne('production', form.dataset.id);
-    if (!rec) throw new InputError('Este registro ya no existe.');
-    if (rec.status !== 'borrador') throw new InputError('Este registro ya se envió a revisión y no se puede modificar.');
-    const actuals = rec.weighings.map((w, i) => parseNum(form.elements[`actual_${i}`].value, `Real de ${w.ingredient}`));
-    rec.weighings.forEach((w, i) => {
-      w.actual = actuals[i];
-      w.material_lot = str(form.elements[`lot_${i}`].value).slice(0, 100);
-    });
-    rec.notes = str(form.elements.notes.value);
-    if (submitter && submitter.value === 'submit') {
-      const missing = rec.weighings.filter((w) => !isNum(w.actual) || !w.material_lot);
-      if (!rec.weighings.length || missing.length) {
-        await save('production', rec, 'actualizar_pesadas', rec.record_code);
-        throw new InputError(`Faltan pesadas reales o lotes de: ${missing.map((w) => w.ingredient).join(', ')}. Lo que has escrito se ha guardado.`);
-      }
-      const go = await ask({
-        title: 'Enviar a revisión',
-        message: 'Después ya no podrás modificar las pesadas ni los lotes. El envío no libera ni autoriza el preparado.',
-        confirmLabel: 'Enviar',
-      });
-      if (!go) {
-        await save('production', rec, 'actualizar_pesadas', rec.record_code);
-        toast('Pesadas y lotes guardados.');
-        await route();
-        return;
-      }
-      rec.status = 'pendiente_revision';
-      rec.submitted_at = nowIso();
-      await save('production', rec, 'enviar_revision', rec.record_code);
-      toast('Enviado a revisión farmacéutica. No implica liberación.');
-    } else {
-      await save('production', rec, 'actualizar_pesadas', rec.record_code);
-      toast('Pesadas y lotes guardados.');
-    }
-    await route();
-  },
-
   async changePin(form) {
     const d = formData(form);
     const p = state.profile;
@@ -1532,6 +1105,34 @@ const FORMS = {
     await logOnly('cambio_pin', profile.name);
     form.reset();
     toast('PIN cambiado.');
+  },
+
+  async settings(form) {
+    const d = formData(form);
+    const s = await loadSettings();
+    const next = parseInt(str(d.lot_next), 10);
+    if (!Number.isInteger(next) || next < 1 || next > 9999999) throw new InputError('El próximo número de lote debe ser un número entero mayor que cero.');
+    const letter = str(d.lot_letter).toUpperCase();
+    if (!/^[A-Z0-9]{1,4}$/.test(letter)) throw new InputError('La letra del lote solo puede tener letras o números (por ejemplo, J).');
+    const pFactor = parseNum(d.p_factor, 'Factor P');
+    if (!(pFactor > 0 && pFactor < 100)) throw new InputError('El factor P debe ser un importe en euros mayor que cero (por ejemplo, 3,65).');
+    const iva = parseNum(d.iva, 'IVA');
+    if (!(iva >= 0 && iva <= 30)) throw new InputError('El IVA debe estar entre 0 y 30 %.');
+    const used = (await getAll('production')).filter((p) => p.lot).map((p) => p.lot);
+    const preview = lotPreview({ lot: { letter } }, next);
+    if (used.includes(preview)) throw new InputError(`El lote ${preview} ya está asignado. Elige un número mayor.`);
+    const updated = {
+      ...s,
+      pharmacy: { name: str(d.ph_name).slice(0, 120), address: str(d.ph_address).slice(0, 200), phone: str(d.ph_phone).slice(0, 40), pharmacist: str(d.ph_pharmacist).slice(0, 120) },
+      lot: { letter, next },
+      label: { layout: d.label_layout === '2' ? '2' : '8', all_components: d.label_all === 'on' },
+      pricing: { p_factor: pFactor, iva },
+      equipment: lines(d.equipment),
+      qc_tests: lines(d.qc_tests),
+    };
+    await saveSettings(updated, `Farmacia, lotes (próximo ${preview}), etiquetas, factor P ${fmtNum(pFactor)} €, IVA ${fmtNum(iva)} % y utillaje`);
+    toast('Ajustes guardados.');
+    await route();
   },
 };
 
@@ -1557,19 +1158,15 @@ async function onSubmit(e) {
 function onInput(e) {
   const t = e.target;
   if (t.matches('[data-filter]')) {
-    const q = lc(str(t.value));
+    const words = fold(str(t.value)).split(/\s+/).filter(Boolean);   // todas las palabras, en cualquier orden
     const rows = $$('[data-list] > li');
     let shown = 0;
-    rows.forEach((li) => { const hit = !q || li.dataset.text.includes(q); li.hidden = !hit; if (hit) shown += 1; });
+    rows.forEach((li) => { const text = fold(li.dataset.text); const hit = words.every((w) => text.includes(w)); li.hidden = !hit; if (hit) shown += 1; });
     const none = $('[data-none]');
     if (none) none.hidden = shown > 0;
-  } else if (t.matches('[data-weigh-actual]')) {
-    updateDeviation(t);
-  } else if (t.matches('[data-weigh-lot]')) {
-    updateLotWarning(t);
-  } else if (t.closest('form[data-form="productionNew"]')) {
-    updatePreview(t.closest('form'));
+    return;
   }
+  INPUT_HOOKS.forEach((fn) => { try { fn(t, e); } catch (err) { console.error(err); } });
 }
 async function onChange(e) {
   const t = e.target;
@@ -1582,9 +1179,8 @@ async function onChange(e) {
     t.value = '';
     if (!file) return;
     try { await importBackup(file); } catch (err) { reportError(err); }
-  } else if (t.closest('form[data-form="productionNew"]')) {
-    updatePreview(t.closest('form'));
   }
+  CHANGE_HOOKS.forEach((fn) => { try { fn(t, e); } catch (err) { console.error(err); } });
 }
 
 window.addEventListener('hashchange', (e) => { state.prevBack = e.oldURL.includes('#') ? `#${e.oldURL.split('#')[1]}` : '#inicio'; });

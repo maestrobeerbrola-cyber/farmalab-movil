@@ -1,3 +1,4 @@
 Librerías de terceros incluidas sin modificar:
 - pdf.js (pdfjs-dist 6.5.438), Mozilla, licencia Apache 2.0 (vendor/pdfjs/LICENSE). Fuentes estándar y módulos wasm con sus propias licencias en sus carpetas.
 - mammoth 1.13.0, Michael Williamson, licencia BSD de 2 cláusulas (vendor/mammoth/LICENSE).
+- pdf-lib 1.17.1, Andrew Dillon, licencia MIT (vendor/pdf-lib/LICENSE.md).
