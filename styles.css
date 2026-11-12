@@ -265,3 +265,29 @@ input[type="text"].display-input:focus { outline: none; border: 0; }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 6px; }
 .dialog-actions .btn { flex: 1; }
 .banner.preview { background: #fff4c7; color: #5c4600; font-size: 14px; }
+
+/* ---------- documentos de PNT */
+.doc-tag { display: inline-block; padding: 0 7px; border-radius: 5px; background: var(--navy); color: #fff; font-size: 12px; font-weight: 600; line-height: 20px; }
+.actions.spaced { margin-top: 12px; }
+.filepick { display: grid; gap: 6px; justify-items: start; }
+.filepick .hint { margin-top: 0; overflow-wrap: anywhere; }
+.doc-head { display: grid; gap: 6px; margin-bottom: 14px; }
+.doc-head strong { font-size: 18px; overflow-wrap: anywhere; }
+.doc-head .actions { margin-top: 6px; }
+.docview { display: grid; gap: 12px; }
+.docview .pages { margin: 0 4px; }
+.pdf-page { width: 100%; background: #fff; border: 1px solid var(--line); border-radius: 4px; box-shadow: 0 1px 3px rgba(20, 40, 60, .12); overflow: hidden; }
+.pdf-page img { display: block; width: 100%; height: auto; }
+.docx { padding: 20px 18px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); font-size: 16px; line-height: 1.55; overflow-wrap: anywhere; }
+.docx > :first-child { margin-top: 0; }
+.docx h1 { font-size: 21px; margin: 0 0 12px; }
+.docx h2 { font-size: 18px; color: var(--ink); margin: 22px 0 8px; }
+.docx h3, .docx h4 { font-size: 16px; margin: 18px 0 6px; }
+.docx p { margin: 0 0 10px; }
+.docx ul, .docx ol { margin: 0 0 12px; padding-left: 24px; }
+.docx li { margin-bottom: 4px; }
+.docx img { max-width: 100%; height: auto; }
+.docx .table-scroll { overflow-x: auto; margin: 0 0 14px; }
+.docx table { border-collapse: collapse; min-width: 100%; font-size: 15px; }
+.docx td, .docx th { min-width: 72px; border: 1px solid var(--field-line); padding: 6px 8px; vertical-align: top; overflow-wrap: normal; word-break: normal; hyphens: auto; }
+.docx td p, .docx th p { margin: 0; }

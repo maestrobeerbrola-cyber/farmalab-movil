@@ -6,11 +6,20 @@
  * sincronizarlo más adelante con la versión de PC.
  */
 
-const APP_VERSION = '0.1.0';
+const APP_VERSION = '0.2.0';
 const PREVIEW = document.documentElement.dataset.preview === '1'; // copia de prueba publicada en Claude
 const DB_NAME = 'farmalab-movil';
 const EXPORT_FORMAT = 'farmalab-datos';
-const EXPORT_FORMAT_VERSION = 1;
+const EXPORT_FORMAT_VERSION = 2;          // 2: incluye los documentos de los PNT
+const DB_VERSION = 2;                     // 2: almacén de documentos de PNT
+const FILE_STORE = 'pnt_file';
+const MAX_DOC_BYTES = 25 * 1048576;
+const DOC_TYPES = {
+  pdf: { label: 'PDF', mime: 'application/pdf' },
+  docx: { label: 'Word', mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
+  doc: { label: 'Word 97-2003', mime: 'application/msword' },
+};
+const DOC_ACCEPT = '.pdf,.docx,.doc,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword';
 const STORES = ['material', 'formula', 'pnt', 'production', 'audit'];
 const LOCK_HIDDEN_MS = 5 * 60 * 1000;   // bloqueo tras 5 min con la app en segundo plano
 const LOCK_IDLE_MS = 15 * 60 * 1000;    // o tras 15 min sin tocar la pantalla
@@ -35,6 +44,8 @@ const ACTION_LABELS = {
   alta_formula: 'Alta de fórmula',
   cambio_estado_formula: 'Cambio de estado de fórmula',
   alta_pnt: 'Alta de PNT',
+  alta_documento_pnt: 'Documento de PNT subido',
+  cambio_estado_pnt: 'Cambio de estado de PNT',
   crear_registro_elaboracion: 'Nuevo registro de elaboración',
   actualizar_pesadas: 'Pesadas y lotes guardados',
   enviar_revision: 'Enviado a revisión farmacéutica',
@@ -53,13 +64,14 @@ const SECTIONS = {
   pnt: { title: 'PNT', tab: 4 },
   ajustes: { title: 'Ajustes' },
   auditoria: { title: 'Actividad' },
+  documento: { title: 'Documento', tab: 4 },
 };
 
 const state = {
   profile: null, deviceId: null, unlocked: false,
   hiddenAt: 0, lastTouch: Date.now(),
   deferredInstall: null, swWaiting: null, updateRequested: false,
-  formulaCache: {}, materials: [], prevHash: '', parent: '#inicio',
+  formulaCache: {}, materials: [], prevHash: '', parent: '#inicio', objectUrls: [],
 };
 
 // ------------------------------------------------------------------ utilidades
@@ -106,6 +118,20 @@ function parseNum(value, label) {
 }
 
 const b64e = (u8) => btoa(String.fromCharCode(...u8));
+const fmtSize = (n) => (n < 1048576 ? `${Math.max(1, Math.round(n / 1024))} KB` : `${(n / 1048576).toLocaleString('es-ES', { maximumFractionDigits: 1 })} MB`);
+const toHex = (buf) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, '0')).join('');
+async function blobToBase64(blob) {
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+function base64ToBytes(b64) {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i += 1) out[i] = bin.charCodeAt(i);
+  return out;
+}
 const b64d = (s) => Uint8Array.from(atob(s), (c) => c.charCodeAt(0));
 async function hashPin(pin, saltB64, iterations) {
   const key = await crypto.subtle.importKey('raw', new TextEncoder().encode(pin), 'PBKDF2', false, ['deriveBits']);
@@ -121,13 +147,21 @@ let dbPromise = null;
 function openDB() {
   if (!dbPromise) {
     dbPromise = new Promise((resolve, reject) => {
-      const r = indexedDB.open(DB_NAME, 1);
+      const r = indexedDB.open(DB_NAME, DB_VERSION);
       r.onupgradeneeded = () => {
+        // Solo crea lo que falta: al pasar de la v1 a la v2 no se toca ningún dato existente.
         const db = r.result;
-        db.createObjectStore('meta');
-        STORES.forEach((s) => db.createObjectStore(s, { keyPath: 'uuid' }));
+        if (!db.objectStoreNames.contains('meta')) db.createObjectStore('meta');
+        STORES.forEach((s) => { if (!db.objectStoreNames.contains(s)) db.createObjectStore(s, { keyPath: 'uuid' }); });
+        if (!db.objectStoreNames.contains(FILE_STORE)) {
+          db.createObjectStore(FILE_STORE, { keyPath: 'uuid' }).createIndex('pnt_uuid', 'pnt_uuid');
+        }
       };
-      r.onsuccess = () => resolve(r.result);
+      r.onsuccess = () => {
+        const db = r.result;
+        db.onversionchange = () => { db.close(); dbPromise = null; };
+        resolve(db);
+      };
       r.onerror = () => reject(r.error);
       r.onblocked = () => reject(new Error('Cierra las otras pestañas de FARMA·LAB y vuelve a abrirla.'));
     });
@@ -155,19 +189,26 @@ function auditEntry(action, detail, stamp) {
     user: state.profile ? state.profile.name : '', action, detail: String(detail ?? '').slice(0, 500),
   };
 }
-/** Guarda un registro y su línea de auditoría en una sola operación. */
-async function save(store, record, action, detail) {
+/** Guarda uno o varios registros y su línea de auditoría en una sola operación. */
+async function saveMany(entries, action, detail) {
   const stamp = nowIso();
-  record.created_at = record.created_at || stamp;
-  record.updated_at = stamp;
-  record.device_id = record.device_id || state.deviceId;
-  await tx([store, 'audit', 'meta'], 'readwrite', (t) => {
-    t.objectStore(store).put(record);
+  entries.forEach(([, r]) => {
+    r.created_at = r.created_at || stamp;
+    r.updated_at = stamp;
+    r.device_id = r.device_id || state.deviceId;
+  });
+  const stores = [...new Set(entries.map(([store]) => store)), 'audit', 'meta'];
+  await tx(stores, 'readwrite', (t) => {
+    entries.forEach(([store, r]) => t.objectStore(store).put(r));
     t.objectStore('audit').put(auditEntry(action, detail, stamp));
     t.objectStore('meta').put(stamp, 'lastChange');
   });
+}
+async function save(store, record, action, detail) {
+  await saveMany([[store, record]], action, detail);
   return record;
 }
+const filesOf = (pntId) => tx(FILE_STORE, 'readonly', (t) => t.objectStore(FILE_STORE).index('pnt_uuid').getAll(pntId));
 const logOnly = (action, detail) => tx('audit', 'readwrite', (t) => t.objectStore('audit').put(auditEntry(action, detail, nowIso())));
 
 // ------------------------------------------------------------------ iconos
@@ -389,6 +430,8 @@ function renderShell() {
 
 async function route() {
   if (!state.unlocked || !$('#view')) return;
+  state.objectUrls.forEach((u) => URL.revokeObjectURL(u));
+  state.objectUrls = [];
   const hash = location.hash || '#inicio';
   const parts = hash.slice(1).split('--');
   if (parts[0] === 'inicio') parts[0] = '';
@@ -402,7 +445,8 @@ async function route() {
       case 'materias': html = arg === 'nueva' ? viewMaterialForm() : arg ? await viewMaterial(arg) : await viewMaterials(); break;
       case 'formulas': html = arg === 'nueva' ? await viewFormulaForm() : arg ? await viewFormula(arg) : await viewFormulas(); break;
       case 'elaboraciones': html = arg === 'nueva' ? await viewProductionNew(extra) : arg ? await viewProduction(arg) : await viewProductions(); break;
-      case 'pnt': html = arg === 'nuevo' ? viewPntForm() : await viewPnts(); break;
+      case 'pnt': html = arg === 'nuevo' ? viewPntForm() : arg ? await viewPnt(arg) : await viewPnts(); break;
+      case 'documento': html = await viewDocument(arg); break;
       case 'ajustes': html = await viewSettings(); break;
       case 'auditoria': html = await viewAudit(); break;
       default: html = empty('Página no encontrada', 'Usa las pestañas de abajo para moverte por la app.');
@@ -430,6 +474,8 @@ function afterRender() {
   if (form) updatePreview(form);
   $$('[data-weigh-actual]').forEach(updateDeviation);
   $$('[data-weigh-lot]').forEach(updateLotWarning);
+  const viewer = $('#docview');
+  if (viewer) renderDocument(viewer);
 }
 
 // ------------------------------------------------------------------ Inicio
@@ -731,16 +777,75 @@ function updateLotWarning(input) {
 }
 
 // ------------------------------------------------------------------ PNT
+const latestFirst = (a, b) => String(b.created_at).localeCompare(String(a.created_at));
+
 async function viewPnts() {
   const items = (await getAll('pnt')).sort(byText('code'));
+  const latest = {};
+  (await getAll(FILE_STORE)).sort(latestFirst).forEach((f) => { if (!latest[f.pnt_uuid]) latest[f.pnt_uuid] = f; });
   const list = items.length
     ? `<ul class="list" data-list>${items.map((p) => {
       const overdue = p.status === 'vigente' && isDay(p.review_date) && daysUntil(p.review_date) < 0;
-      return `<li data-text="${esc(lc([p.code, p.title, p.category, p.file_note].join(' ')))}"><div class="row"><div class="row-main"><strong><span class="code">${esc(p.code)}</span> ${esc(p.title)}</strong><span class="sub">${p.category ? `<span>${esc(p.category)}</span>` : ''}<span>Versión ${esc(p.version)}</span><span>Revisión ${fmtDay(p.review_date)}</span>${overdue ? '<span class="bad">Revisión vencida</span>' : ''}</span>${p.file_note ? `<span class="sub note">${esc(p.file_note)}</span>` : ''}</div>${pill('pnt', p.status)}</div></li>`;
+      const doc = latest[p.uuid];
+      return `<li data-text="${esc(lc([p.code, p.title, p.category, p.file_note].join(' ')))}"><a class="row" href="#pnt--${esc(p.uuid)}"><div class="row-main"><strong><span class="code">${esc(p.code)}</span> ${esc(p.title)}</strong><span class="sub">${p.category ? `<span>${esc(p.category)}</span>` : ''}<span>Versión ${esc(p.version)}</span><span>Revisión ${fmtDay(p.review_date)}</span>${overdue ? '<span class="bad">Revisión vencida</span>' : ''}</span><span class="sub">${doc ? `<span class="doc-tag">${esc(DOC_TYPES[doc.ext].label)}</span>` : '<span>Sin documento</span>'}</span></div>${pill('pnt', p.status)}</a></li>`;
     }).join('')}</ul><p class="none" data-none hidden>Ningún PNT coincide con la búsqueda.</p>`
     : empty('Aún no hay PNT registrados.', 'Registra el primero con «Nuevo PNT».');
   return `${items.length ? searchBox('Buscar código, título o categoría') : ''}${list}${fab('#pnt--nuevo', 'Nuevo PNT')}`;
 }
+
+const filePicker = (label) => `<div class="filepick">
+    <label class="btn secondary">${esc(label)}<input type="file" name="file" accept="${DOC_ACCEPT}" data-docpick hidden></label>
+    <p class="hint" data-file-chosen>Ningún archivo elegido</p>
+  </div>`;
+
+function docRow(f, current) {
+  return `<li><a class="row" href="#documento--${esc(f.uuid)}"><div class="row-main"><strong>${esc(f.name)}</strong><span class="sub"><span class="doc-tag">${esc(DOC_TYPES[f.ext].label)}</span><span>Versión ${esc(f.version)}</span><span>${esc(fmtStamp(f.created_at).slice(0, 10))}</span><span>${fmtSize(f.size)}</span></span></div>${current ? '<span class="pill green">Vigente</span>' : ''}</a></li>`;
+}
+
+async function viewPnt(id) {
+  const p = await getOne('pnt', id);
+  if (!p) return empty('Este PNT no existe.', 'Puede que el enlace no sea correcto.');
+  const docs = (await filesOf(id)).sort(latestFirst);
+  const [current, ...older] = docs;
+  const overdue = p.status === 'vigente' && isDay(p.review_date) && daysUntil(p.review_date) < 0;
+  const canShare = current && current.ext === 'pdf' && navigator.canShare
+    && navigator.canShare({ files: [new File([''], 'x.pdf', { type: 'application/pdf' })] });
+  return `<div class="panel">
+    <div class="head-row"><h2 class="big"><span class="code">${esc(p.code)}</span> ${esc(p.title)}</h2>${pill('pnt', p.status)}</div>
+    <dl class="facts">
+      <dt>Versión</dt><dd>${esc(p.version)}</dd>
+      <dt>Categoría</dt><dd>${esc(p.category || '—')}</dd>
+      <dt>En vigor desde</dt><dd>${fmtDay(p.effective_date)}</dd>
+      <dt>Próxima revisión</dt><dd>${fmtDay(p.review_date)}${overdue ? ' <span class="bad">vencida</span>' : ''}</dd>
+      <dt>Ubicación</dt><dd>${esc(p.file_note || '—')}</dd>
+    </dl>
+  </div>
+  <section><h2>Documento</h2>
+  ${current
+    ? `<ul class="list">${docRow(current, true)}</ul>
+       <div class="actions spaced">
+         <a class="btn" href="#documento--${esc(current.uuid)}">Ver documento</a>
+         <button class="btn secondary" data-act="downloadDoc" data-id="${esc(current.uuid)}">Descargar</button>
+         ${canShare ? `<button class="btn secondary" data-act="shareDoc" data-id="${esc(current.uuid)}">Abrir con otra app</button>` : ''}
+       </div>`
+    : empty('Este PNT aún no tiene documento.', 'Súbelo en PDF o Word para consultarlo desde aquí, también sin conexión.')}
+  </section>
+  <section><h2>${current ? 'Subir una versión nueva' : 'Subir documento'}</h2>
+  <form class="panel form" data-form="pntDoc" data-id="${esc(p.uuid)}" novalidate>
+    ${formMsg()}
+    ${filePicker('Elegir PDF o Word')}
+    <div class="grid2">
+      ${field('Versión del PNT', text('version', `value="${esc(p.version)}" maxlength="30"`))}
+      ${field('En vigor desde', `<input type="date" name="effective_date" value="${isDay(p.effective_date) ? p.effective_date : ''}">`)}
+    </div>
+    ${field('Próxima revisión', `<input type="date" name="review_date" value="${isDay(p.review_date) ? p.review_date : ''}">`)}
+    <button class="btn block" type="submit">Guardar documento</button>
+    <p class="hint">Máximo 25 MB. Se guarda en este teléfono y entra en las copias de seguridad.${current ? ' El documento actual pasará a versiones anteriores; no se borra.' : ''}</p>
+  </form></section>
+  ${older.length ? `<section><h2>Versiones anteriores</h2><ul class="list">${older.map((f) => docRow(f, false)).join('')}</ul></section>` : ''}
+  <section><h2>Cambiar estado</h2><div class="actions">${Object.keys(STATUS.pnt).map((s) => `<button class="btn ${s === p.status ? '' : 'secondary'}" data-act="setStatus" data-store="pnt" data-id="${esc(p.uuid)}" data-status="${s}" ${s === p.status ? 'disabled' : ''}>${STATUS.pnt[s]}</button>`).join('')}</div></section>`;
+}
+
 function viewPntForm() {
   return `<form class="form" data-form="pnt" novalidate>
     ${formMsg()}
@@ -754,15 +859,207 @@ function viewPntForm() {
       ${field('Entrada en vigor', '<input type="date" name="effective_date">')}
       ${field('Próxima revisión', '<input type="date" name="review_date">')}
     </div>
-    ${field('Ubicación o nota documental', text('file_note', 'maxlength="500"'), 'Dónde está el documento: carpeta, archivador, enlace...')}
+    <div class="field"><span>Documento (opcional)</span>${filePicker('Elegir PDF o Word')}</div>
+    ${field('Ubicación del original', text('file_note', 'maxlength="500"'), 'Dónde está el documento en papel: carpeta, archivador...')}
     ${field('Estado', `<select name="status">${options(Object.keys(STATUS.pnt), 'borrador', STATUS.pnt)}</select>`)}
     <button class="btn block" type="submit">Guardar PNT</button>
   </form>`;
 }
 
+/** Comprueba el contenido real del archivo (no solo la extensión). */
+async function sniffDoc(file) {
+  const head = new Uint8Array(await file.slice(0, 1024).arrayBuffer());
+  const ext = String(file.name.split('.').pop() || '').toLowerCase();
+  const starts = (sig) => sig.every((b, i) => head[i] === b);
+  const pdfAt = new TextDecoder('latin1').decode(head).indexOf('%PDF-');
+  if (pdfAt !== -1) return 'pdf';
+  if (ext === 'docx' && starts([0x50, 0x4b, 0x03, 0x04])) return 'docx';
+  if (ext === 'doc' && starts([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1])) return 'doc';
+  return null;
+}
+async function buildDocRecord(file, pnt, existing, version) {
+  if (!file.size) throw new InputError('El archivo está vacío.');
+  if (file.size > MAX_DOC_BYTES) throw new InputError(`El archivo ocupa ${fmtSize(file.size)}. El máximo es 25 MB.`);
+  const ext = await sniffDoc(file);
+  if (!ext) throw new InputError('Solo se admiten documentos PDF (.pdf) o Word (.docx o .doc).');
+  const buf = await file.arrayBuffer();
+  const sha256 = toHex(await crypto.subtle.digest('SHA-256', buf));
+  if (existing.some((f) => f.sha256 === sha256)) throw new InputError('Ese mismo archivo ya está guardado en este PNT.');
+  return {
+    uuid: newId(), pnt_uuid: pnt.uuid, name: file.name.slice(0, 200), ext, mime: DOC_TYPES[ext].mime,
+    size: file.size, version: version || '1', sha256, uploaded_by: state.profile.name,
+    blob: new Blob([buf], { type: DOC_TYPES[ext].mime }),
+  };
+}
+
+// ------------------------------------------------------------------ visor de documentos
+async function viewDocument(id) {
+  const doc = await getOne(FILE_STORE, id);
+  if (!doc) return empty('Este documento no existe.', '');
+  const p = await getOne('pnt', doc.pnt_uuid);
+  state.parent = `#pnt--${doc.pnt_uuid}`;
+  const canShare = doc.ext === 'pdf' && navigator.canShare
+    && navigator.canShare({ files: [new File([''], 'x.pdf', { type: 'application/pdf' })] });
+  return `<div class="doc-head">
+    <strong>${esc(p ? `${p.code} ${p.title}` : doc.name)}</strong>
+    <span class="sub"><span>${esc(doc.name)}</span><span>Versión ${esc(doc.version)}</span><span>${fmtSize(doc.size)}</span></span>
+    <div class="actions">
+      <button class="btn secondary small" data-act="downloadDoc" data-id="${esc(doc.uuid)}">Descargar</button>
+      ${canShare ? `<button class="btn secondary small" data-act="shareDoc" data-id="${esc(doc.uuid)}">Abrir con otra app</button>` : ''}
+    </div>
+  </div>
+  <div id="docview" class="docview" data-id="${esc(doc.uuid)}"><p class="hint">Abriendo el documento...</p></div>`;
+}
+
+async function renderDocument(container) {
+  const doc = await getOne(FILE_STORE, container.dataset.id);
+  if (!doc || !container.isConnected) return;
+  try {
+    if (doc.ext === 'pdf') await renderPdf(container, doc);
+    else if (doc.ext === 'docx') await renderDocx(container, doc);
+    else {
+      container.innerHTML = `<div class="msg warn">Los documentos .doc (Word 97-2003) no se pueden mostrar dentro de la app. Pulsa «Descargar» para abrirlo con Word, o guárdalo como .docx o PDF y súbelo de nuevo.</div>`;
+    }
+  } catch (err) {
+    console.error(err);
+    if (container.isConnected) {
+      container.innerHTML = `<div class="msg error">No se ha podido mostrar el documento (${esc(err && err.message ? err.message : err)}). Puedes descargarlo y abrirlo con otra app.</div>`;
+    }
+  }
+}
+
+const vendorUrl = (path) => new URL(`vendor/${path}`, document.baseURI).href;
+let pdfjsPromise = null;
+function loadPdfJs() {
+  if (!pdfjsPromise) {
+    pdfjsPromise = import(vendorUrl('pdfjs/pdf.min.mjs')).then((lib) => {
+      lib.GlobalWorkerOptions.workerSrc = vendorUrl('pdfjs/pdf.worker.min.mjs');
+      return lib;
+    }).catch((err) => { pdfjsPromise = null; throw err; });
+  }
+  return pdfjsPromise;
+}
+
+async function renderPdf(container, doc) {
+  const pdfjs = await loadPdfJs();
+  const pdf = await pdfjs.getDocument({
+    data: new Uint8Array(await doc.blob.arrayBuffer()),
+    standardFontDataUrl: vendorUrl('pdfjs/standard_fonts/'),
+    wasmUrl: vendorUrl('pdfjs/wasm/'),
+    iccUrl: vendorUrl('pdfjs/iccs/'),
+    isEvalSupported: false,
+    enableXfa: false,
+  }).promise;
+  if (!container.isConnected) { pdf.destroy(); return; }
+  container.innerHTML = `<p class="hint pages">${pdf.numPages} ${pdf.numPages === 1 ? 'página' : 'páginas'}. Pellizca para ampliar.</p>`;
+  const width = container.clientWidth || 360;
+  const dpr = Math.min(window.devicePixelRatio || 1, 3);
+  const slots = [];
+  for (let n = 1; n <= pdf.numPages; n += 1) {
+    const page = await pdf.getPage(n);
+    const base = page.getViewport({ scale: 1 });
+    const slot = document.createElement('div');
+    slot.className = 'pdf-page';
+    slot.style.aspectRatio = `${base.width} / ${base.height}`;
+    slot.dataset.page = String(n);
+    slot.setAttribute('aria-label', `Página ${n}`);
+    container.append(slot);
+    slots.push({ slot, page, base });
+  }
+  // Cada página se pinta al acercarse a la pantalla y se guarda como imagen: así no se agota la memoria del móvil.
+  const paint = async ({ slot, page, base }) => {
+    if (slot.dataset.done) return;
+    slot.dataset.done = '1';
+    let scale = (width / base.width) * dpr * 1.5;
+    const maxPixels = 6e6;
+    if (base.width * base.height * scale * scale > maxPixels) scale = Math.sqrt(maxPixels / (base.width * base.height));
+    const viewport = page.getViewport({ scale });
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.floor(viewport.width);
+    canvas.height = Math.floor(viewport.height);
+    const ctx = canvas.getContext('2d');
+    await page.render({ canvasContext: ctx, canvas, viewport }).promise;
+    const blob = await new Promise((res) => canvas.toBlob(res, 'image/png'));
+    canvas.width = 0; canvas.height = 0;
+    if (!slot.isConnected || !blob) return;
+    const url = URL.createObjectURL(blob);
+    state.objectUrls.push(url);
+    const img = document.createElement('img');
+    img.src = url;
+    img.alt = `Página ${slot.dataset.page}`;
+    slot.append(img);
+  };
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach((e) => {
+      if (!e.isIntersecting) return;
+      observer.unobserve(e.target);
+      const item = slots.find((x) => x.slot === e.target);
+      if (item) paint(item).catch((err) => console.error(err));
+    });
+  }, { rootMargin: '800px 0px' });
+  slots.forEach(({ slot }) => observer.observe(slot));
+}
+
+let mammothPromise = null;
+function loadMammoth() {
+  if (!mammothPromise) {
+    mammothPromise = new Promise((resolve, reject) => {
+      if (window.mammoth) { resolve(window.mammoth); return; }
+      const script = document.createElement('script');
+      script.src = vendorUrl('mammoth/mammoth.browser.min.js');
+      script.onload = () => resolve(window.mammoth);
+      script.onerror = () => { mammothPromise = null; reject(new Error('no se pudo cargar el lector de Word')); };
+      document.head.append(script);
+    });
+  }
+  return mammothPromise;
+}
+
+async function renderDocx(container, doc) {
+  const mammoth = await loadMammoth();
+  const result = await mammoth.convertToHtml({ arrayBuffer: await doc.blob.arrayBuffer() });
+  if (!container.isConnected) return;
+  const article = document.createElement('article');
+  article.className = 'docx';
+  article.append(sanitizeDocHtml(result.value));
+  container.innerHTML = '<p class="hint pages">Vista de lectura: se muestra el texto, las tablas y las imágenes; el diseño de página puede diferir del original.</p>';
+  container.append(article);
+}
+
+/** Deja solo etiquetas de texto seguras del HTML generado a partir del Word. */
+function sanitizeDocHtml(html) {
+  const tpl = document.createElement('template');
+  tpl.innerHTML = html;
+  const allowed = new Set(['P', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'STRONG', 'B', 'EM', 'I', 'U', 'S', 'SUB', 'SUP', 'BR',
+    'UL', 'OL', 'LI', 'TABLE', 'THEAD', 'TBODY', 'TR', 'TD', 'TH', 'A', 'IMG', 'SPAN', 'BLOCKQUOTE', 'PRE', 'CODE']);
+  const drop = new Set(['SCRIPT', 'STYLE', 'IFRAME', 'OBJECT', 'EMBED', 'LINK', 'META', 'FORM', 'INPUT', 'BUTTON', 'SVG', 'MATH']);
+  [...tpl.content.querySelectorAll('*')].forEach((el) => {
+    if (drop.has(el.tagName)) { el.remove(); return; }
+    if (!allowed.has(el.tagName)) { el.replaceWith(...el.childNodes); return; }
+    [...el.attributes].forEach((a) => {
+      const name = a.name.toLowerCase();
+      const keep = (el.tagName === 'A' && name === 'href' && /^(https?:|mailto:|#)/i.test(a.value))
+        || (el.tagName === 'IMG' && name === 'src' && /^data:image\/(png|jpe?g|gif|webp|bmp);/i.test(a.value))
+        || (el.tagName === 'IMG' && name === 'alt')
+        || ((el.tagName === 'TD' || el.tagName === 'TH') && (name === 'colspan' || name === 'rowspan') && /^\d{1,3}$/.test(a.value));
+      if (!keep) el.removeAttribute(a.name);
+    });
+    if (el.tagName === 'A' && el.hasAttribute('href')) { el.target = '_blank'; el.rel = 'noopener noreferrer'; }
+    if (el.tagName === 'TABLE') {
+      const wrap = document.createElement('div');
+      wrap.className = 'table-scroll';
+      el.replaceWith(wrap);
+      wrap.append(el);
+    }
+  });
+  return tpl.content;
+}
+
 // ------------------------------------------------------------------ Ajustes, copias y actividad
 async function viewSettings() {
   const backup = await backupStatus();
+  const docs = await getAll(FILE_STORE);
+  const docBytes = docs.reduce((n, f) => n + (f.size || 0), 0);
   let persisted = null; let usage = '';
   try {
     if (navigator.storage && navigator.storage.persisted) persisted = await navigator.storage.persisted();
@@ -782,6 +1079,7 @@ async function viewSettings() {
         ${canShare ? '<button class="btn secondary" data-act="share">Compartir copia</button>' : ''}
         <label class="btn secondary">Importar copia<input type="file" accept=".json,application/json" data-import hidden></label>
       </div>
+      ${docs.length ? `<p class="hint">La copia incluye ${docs.length} ${docs.length === 1 ? 'documento' : 'documentos'} de PNT (${fmtSize(docBytes)}), así que ocupará algo más.</p>` : ''}
       <p class="hint">La copia es un archivo .json que se guarda en Descargas. Guárdalo también fuera del teléfono (correo, Drive o el PC). Importar añade los registros que no tengas y actualiza los que sean más recientes; no borra nada.</p>
     </div></section>
   <section><h2>Seguridad</h2><form class="panel form" data-form="changePin" novalidate autocomplete="off">
@@ -816,11 +1114,23 @@ async function viewAudit() {
 async function buildExport() {
   const datos = {};
   for (const s of STORES) datos[s] = await getAll(s);
+  datos[FILE_STORE] = [];
+  for (const f of await getAll(FILE_STORE)) {
+    const { blob, ...meta } = f;
+    datos[FILE_STORE].push({ ...meta, data: await blobToBase64(blob) });
+  }
   return {
     formato: EXPORT_FORMAT, version_formato: EXPORT_FORMAT_VERSION,
     app: `FARMA·LAB móvil ${APP_VERSION}`, exportado: nowIso(),
     dispositivo: state.deviceId, usuario: state.profile.name, datos,
   };
+}
+function downloadBlob(blob, name) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = name;
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 30000);
 }
 async function exportBackup(share) {
   if (PREVIEW) { toast('En la vista previa no se pueden descargar copias. Funciona en la versión publicada.'); return; }
@@ -836,11 +1146,7 @@ async function exportBackup(share) {
       throw err;
     }
   } else {
-    const url = URL.createObjectURL(file);
-    const a = document.createElement('a');
-    a.href = url; a.download = name;
-    document.body.append(a); a.click(); a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 15000);
+    downloadBlob(file, name);
   }
   await metaSet('lastExport', nowIso());
   await logOnly('exportar_copia', name);
@@ -849,6 +1155,17 @@ async function exportBackup(share) {
 }
 
 const ID_RE = /^(?=.{8,64}$)[A-Za-z0-9]+(-[A-Za-z0-9]+)*$/;
+/** Documento de PNT de una copia: valida los datos y comprueba que el archivo llega íntegro (SHA-256). */
+async function importedDoc(r) {
+  if (!r || typeof r !== 'object' || !ID_RE.test(String(r.uuid)) || !ID_RE.test(String(r.pnt_uuid))) return null;
+  if (typeof r.updated_at !== 'string' || typeof r.name !== 'string' || !DOC_TYPES[r.ext] || typeof r.data !== 'string') return null;
+  if (!/^[0-9a-f]{64}$/.test(String(r.sha256)) || r.data.length > (MAX_DOC_BYTES * 4) / 3 + 8) return null;
+  let bytes;
+  try { bytes = base64ToBytes(r.data); } catch { return null; }
+  if (toHex(await crypto.subtle.digest('SHA-256', bytes)) !== r.sha256) return null;
+  const { data, ...meta } = r;
+  return { ...meta, name: meta.name.slice(0, 200), mime: DOC_TYPES[r.ext].mime, size: bytes.length, blob: new Blob([bytes], { type: DOC_TYPES[r.ext].mime }) };
+}
 function validRecord(store, r) {
   if (!r || typeof r !== 'object' || Array.isArray(r) || !ID_RE.test(String(r.uuid)) || typeof r.updated_at !== 'string') return false;
   const s = (v) => typeof v === 'string';
@@ -865,7 +1182,7 @@ function validRecord(store, r) {
   }
 }
 async function importBackup(file) {
-  if (file.size > 50 * 1048576) throw new InputError('El archivo es demasiado grande para ser una copia de FARMA·LAB.');
+  if (file.size > 600 * 1048576) throw new InputError('El archivo es demasiado grande para ser una copia de FARMA·LAB.');
   let payload;
   try { payload = JSON.parse(await file.text()); } catch { throw new InputError('No se puede leer el archivo: no es una copia de FARMA·LAB.'); }
   if (!payload || payload.formato !== EXPORT_FORMAT || !payload.datos || typeof payload.datos !== 'object') {
@@ -886,11 +1203,22 @@ async function importBackup(file) {
       if (!cur) { plan[s].push(r); added += 1; } else if (r.updated_at > (cur.updated_at || '')) { plan[s].push(r); updated += 1; } else same += 1;
     }
   }
-  const summary = `Copia de ${payload.usuario || 'origen desconocido'} del ${fmtStamp(payload.exportado)}.\n\nRegistros nuevos: ${added}\nMás recientes que los tuyos: ${updated}\nIguales o más antiguos (se ignoran): ${same}${invalid ? `\nNo válidos (se ignoran): ${invalid}` : ''}\n\nNo se borra nada de lo que ya tienes.`;
+  plan[FILE_STORE] = [];
+  let docs = 0;
+  const existingDocs = new Map((await getAll(FILE_STORE)).map((r) => [r.uuid, r]));
+  for (const raw of Array.isArray(payload.datos[FILE_STORE]) ? payload.datos[FILE_STORE] : []) {
+    const cur = existingDocs.get(raw && raw.uuid);
+    if (cur && !(String(raw.updated_at) > (cur.updated_at || ''))) { same += 1; continue; }
+    const doc = await importedDoc(raw);
+    if (!doc) { invalid += 1; continue; }
+    plan[FILE_STORE].push(doc); docs += 1;
+    if (cur) updated += 1; else added += 1;
+  }
+  const summary = `Copia de ${payload.usuario || 'origen desconocido'} del ${fmtStamp(payload.exportado)}.\n\nRegistros nuevos: ${added}\nMás recientes que los tuyos: ${updated}${docs ? ` (incluye ${docs} ${docs === 1 ? 'documento' : 'documentos'} de PNT)` : ''}\nIguales o más antiguos (se ignoran): ${same}${invalid ? `\nNo válidos o dañados (se ignoran): ${invalid}` : ''}\n\nNo se borra nada de lo que ya tienes.`;
   if (!(await ask({ title: 'Importar copia', message: summary, confirmLabel: 'Importar' }))) return;
   if (added + updated) {
-    await tx([...STORES, 'meta'], 'readwrite', (t) => {
-      for (const s of STORES) plan[s].forEach((r) => t.objectStore(s).put(r));
+    await tx([...STORES, FILE_STORE, 'meta'], 'readwrite', (t) => {
+      for (const s of [...STORES, FILE_STORE]) plan[s].forEach((r) => t.objectStore(s).put(r));
       t.objectStore('meta').put(nowIso(), 'lastChange');
     });
   }
@@ -961,12 +1289,29 @@ const ACTIONS = {
     const rec = await getOne(store, id);
     if (!rec) return;
     rec.status = status;
-    const label = store === 'material' ? `${rec.name} / ${rec.lot}` : `${rec.code || ''} ${rec.name}`.trim();
-    await save(store, rec, store === 'material' ? 'cambio_estado_materia_prima' : 'cambio_estado_formula', `${label}: ${STATUS[store][status]}`);
+    const label = store === 'material' ? `${rec.name} / ${rec.lot}` : store === 'pnt' ? `${rec.code} ${rec.title}` : `${rec.code || ''} ${rec.name}`.trim();
+    const action = { material: 'cambio_estado_materia_prima', formula: 'cambio_estado_formula', pnt: 'cambio_estado_pnt' }[store];
+    await save(store, rec, action, `${label}: ${STATUS[store][status]}`);
     toast(`Estado cambiado a ${STATUS[store][status]}.`);
     await route();
   },
   wipe: () => wipeAll(),
+  downloadDoc: async (el) => {
+    const doc = await getOne(FILE_STORE, el.dataset.id);
+    if (!doc) return;
+    if (PREVIEW) { toast('En la vista previa no se pueden descargar archivos.'); return; }
+    downloadBlob(doc.blob, doc.name);
+    toast(`Guardado en Descargas: ${doc.name}`);
+  },
+  shareDoc: async (el) => {
+    const doc = await getOne(FILE_STORE, el.dataset.id);
+    if (!doc) return;
+    try {
+      await navigator.share({ files: [new File([doc.blob], doc.name, { type: doc.mime })], title: doc.name });
+    } catch (err) {
+      if (!err || err.name !== 'AbortError') toast('No se pudo compartir. Usa «Descargar» y ábrelo desde Descargas.');
+    }
+  },
   forgotPin: async () => {
     const go = await ask({
       title: 'PIN olvidado',
@@ -1077,15 +1422,37 @@ const FORMS = {
     const d = formData(form);
     const code = str(d.code); const title = str(d.title);
     if (!code || !title) throw new InputError('El código y el título son obligatorios.');
+    if ((await getAll('pnt')).some((x) => lc(x.code) === lc(code))) throw new InputError('Ya existe un PNT con ese código.');
     const rec = {
       uuid: newId(), code: code.slice(0, 80), title: title.slice(0, 180), category: str(d.category).slice(0, 100),
       version: str(d.version).slice(0, 30) || '1',
       effective_date: isDay(d.effective_date) ? d.effective_date : null, review_date: isDay(d.review_date) ? d.review_date : null,
       status: STATUS.pnt[d.status] ? d.status : 'borrador', file_note: str(d.file_note).slice(0, 500),
     };
-    await save('pnt', rec, 'alta_pnt', `${rec.code} ${rec.title}`);
-    toast('PNT registrado.');
-    location.hash = '#pnt';
+    const file = form.elements.file && form.elements.file.files[0];
+    if (file) {
+      const doc = await buildDocRecord(file, rec, [], rec.version);
+      await saveMany([['pnt', rec], [FILE_STORE, doc]], 'alta_pnt', `${rec.code} ${rec.title} (con documento ${doc.name})`);
+    } else {
+      await save('pnt', rec, 'alta_pnt', `${rec.code} ${rec.title}`);
+    }
+    toast(file ? 'PNT registrado con su documento.' : 'PNT registrado.');
+    location.hash = `#pnt--${rec.uuid}`;
+  },
+
+  async pntDoc(form) {
+    const p = await getOne('pnt', form.dataset.id);
+    if (!p) throw new InputError('Este PNT ya no existe.');
+    const file = form.elements.file.files[0];
+    if (!file) throw new InputError('Elige un archivo PDF o Word.');
+    const version = str(form.elements.version.value).slice(0, 30) || p.version || '1';
+    const doc = await buildDocRecord(file, p, await filesOf(p.uuid), version);
+    p.version = version;
+    if (isDay(form.elements.effective_date.value)) p.effective_date = form.elements.effective_date.value;
+    if (isDay(form.elements.review_date.value)) p.review_date = form.elements.review_date.value;
+    await saveMany([['pnt', p], [FILE_STORE, doc]], 'alta_documento_pnt', `${p.code}: ${doc.name} (versión ${version})`);
+    toast('Documento guardado.');
+    await route();
   },
 
   async productionNew(form) {
@@ -1206,7 +1573,11 @@ function onInput(e) {
 }
 async function onChange(e) {
   const t = e.target;
-  if (t.matches('input[data-import]')) {
+  if (t.matches('input[data-docpick]')) {
+    const out = $('[data-file-chosen]', t.closest('form'));
+    const f = t.files && t.files[0];
+    if (out) out.textContent = f ? `${f.name} (${fmtSize(f.size)})` : 'Ningún archivo elegido';
+  } else if (t.matches('input[data-import]')) {
     const file = t.files && t.files[0];
     t.value = '';
     if (!file) return;
