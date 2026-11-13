@@ -1,4 +1,4 @@
-# FARMA·LAB móvil v0.3.9 (prototipo)
+# FARMA·LAB móvil v0.3.10 (prototipo)
 
 App para Android que se instala desde Chrome y funciona sin conexión. Todos los datos se guardan **en el propio teléfono**.
 
@@ -13,6 +13,10 @@ App para Android que se instala desde Chrome y funciona sin conexión. Todos los
 - **Precio de las fórmulas financiadas** (Comunidad de Madrid), ver abajo.
 - **Documentos**: PNT y bibliografía con su PDF o Word, que se consultan dentro de la app, también sin conexión.
 - Registro de actividad, bloqueo con PIN, exportar e importar copias.
+
+## Novedades de la v0.3.10
+- Arreglo: en una elaboración ya elaborada o dispensada se puede completar o corregir el **material de acondicionamiento**. Al guardar la guía, se descuenta del stock lo que se añade y se repone lo que se quita (con confirmación y anotación en la actividad).
+- Arreglo: al vaciar la última fila de una lista (envases, componentes, ensayos...), también se vacían sus desplegables.
 
 ## Novedades de la v0.3.9
 - **Conservación de registros con borrado automático.** Plazos desde la caducidad: elaboraciones 1 año (2 si contienen psicótropos; 5 si contienen estupefacientes o son de uso veterinario); materias primas y material de acondicionamiento, 1 año. Se cambian en Ajustes.

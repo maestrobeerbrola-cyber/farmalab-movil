@@ -165,7 +165,10 @@ Object.assign(ACTIONS, {
     const row = el.closest('[data-comp]');
     const box = row.parentElement;
     if ($$('[data-comp]', box).length > 1) row.remove();
-    else $$('input', row).forEach((i) => { i.value = ''; });
+    else {   // la última fila no se quita: se vacía (también los desplegables, para que no quede nada elegido)
+      $$('input', row).forEach((i) => { i.value = ''; });
+      $$('select', row).forEach((sel) => { sel.selectedIndex = 0; });
+    }
     box.dispatchEvent(new Event('input', { bubbles: true }));   // para que se recalculen los totales que dependan de las filas
   },
 });

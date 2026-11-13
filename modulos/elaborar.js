@@ -201,10 +201,10 @@ async function viewProduction(id) {
   }).join('');
 
   const packUsed = p.packaging_used || [];
-  const packSection = open
+  const packSection = editableGuide
     ? `<div data-rows="pack">${(packUsed.length ? packUsed : [{}]).map((u) => packRow(u)).join('')}</div>
        <button type="button" class="btn secondary small" data-act="addRow" data-kind="pack">${ICON.plus}Añadir envase</button>
-       <p class="hint">Se descuenta del stock al marcarla como elaborada.</p>`
+       <p class="hint">${open ? 'Se descuenta del stock al marcarla como elaborada.' : 'Al guardar la guía se descuenta del stock lo que añadas (y se repone lo que quites).'}</p>`
     : (packUsed.length ? `<ul class="list">${packUsed.map((u) => `<li><div class="row"><span class="row-main">${esc(u.name)}${u.lot ? ` <span class="code">lote ${esc(u.lot)}</span>` : ''}</span><b class="num">${fmtNum(u.qty)} uds.</b></div></li>`).join('')}</ul>` : '<p class="hint none-docs">Sin material de acondicionamiento registrado.</p>');
 
   const pnts = p.pnt_refs || [];
@@ -326,6 +326,8 @@ function readGuide(form, rec) {
       w.material_uuid = m ? m.uuid : null;
       w.supplier = m ? m.supplier || '' : '';
     });
+  }
+  if (form.querySelector('[data-rows="pack"]')) {
     const uuids = all.getAll('pack_uuid'); const qtys = all.getAll('pack_qty');
     rec.packaging_used = [];
     uuids.forEach((u, i) => {
@@ -333,7 +335,10 @@ function readGuide(form, rec) {
       const pk = (state.packs || []).find((x) => x.uuid === u);
       if (!pk) return;
       const qty = intOrNull(qtys[i], `Unidades de ${pk.name}`) || 1;
-      rec.packaging_used.push({ packaging_uuid: pk.uuid, name: `${pk.name}${pk.capacity ? ` ${pk.capacity}` : ''}`, lot: pk.lot || '', qty });
+      if (qty <= 0) throw new InputError(`Las unidades de ${pk.name} deben ser mayores que cero.`);
+      const prev = rec.packaging_used.find((x) => x.packaging_uuid === pk.uuid);
+      if (prev) prev.qty += qty;   // el mismo envase en dos filas se suma
+      else rec.packaging_used.push({ packaging_uuid: pk.uuid, name: `${pk.name}${pk.capacity ? ` ${pk.capacity}` : ''}`, lot: pk.lot || '', qty });
     });
   }
   rec.method_notes = str(el.method_notes.value).slice(0, 4000);
@@ -419,8 +424,34 @@ Object.assign(FORMS, {
     if (!rec) throw new InputError('Este registro ya no existe.');
     if (rec.status === 'rechazada') throw new InputError('Esta elaboración está rechazada y no se puede modificar.');
     const wasStatus = rec.status;
+    const packsBefore = (rec.packaging_used || []).map((u) => ({ ...u }));
     readGuide(form, rec);
     const intent = submitter ? submitter.value : 'save';
+
+    // Elaborada o dispensada: los envases añadidos o quitados después se descuentan o reponen al guardar.
+    let packEntries = []; let packAudit = [];
+    if (wasStatus !== 'en_proceso' && rec.stock_applied) {
+      const delta = new Map();
+      packsBefore.forEach((u) => delta.set(u.packaging_uuid, (delta.get(u.packaging_uuid) || 0) - u.qty));
+      (rec.packaging_used || []).forEach((u) => delta.set(u.packaging_uuid, (delta.get(u.packaging_uuid) || 0) + u.qty));
+      const packs = await getAll('packaging');
+      const changes = [...delta.entries()].filter(([, d]) => d !== 0).map(([uuid, d]) => ({ pk: packs.find((x) => x.uuid === uuid), d })).filter((c) => c.pk);
+      if (changes.length) {
+        const lines = changes.map(({ pk, d }) => `${recordLabel('packaging', pk)}: ${d > 0 ? '−' : '+'}${fmtNum(Math.abs(d))} uds. (quedan ${fmtNum(Math.max(0, pk.quantity - d))})${d > 0 && pk.quantity < d ? ' ¡stock insuficiente!' : ''}`);
+        const ok = await ask({ title: 'Material de acondicionamiento', message: `Al guardar se ajustará el stock:\n${lines.join('\n')}`, confirmLabel: 'Guardar' });
+        if (!ok) return;
+        const tag = rec.lot || rec.record_code;
+        rec.consumption = rec.consumption || [];
+        changes.forEach(({ pk, d }) => {
+          pk.quantity = Math.max(0, pk.quantity - d);
+          packEntries.push(['packaging', pk]);
+          packAudit.push(['consumo_stock', `${tag}: ${recordLabel('packaging', pk)} ${d > 0 ? '−' : '+'}${fmtNum(Math.abs(d))} uds.`]);
+          const c = rec.consumption.find((x) => x.store === 'packaging' && x.uuid === pk.uuid);
+          if (c) c.amount += d; else rec.consumption.push({ store: 'packaging', uuid: pk.uuid, name: recordLabel('packaging', pk), amount: d, unit: 'uds.' });
+        });
+        rec.consumption = rec.consumption.filter((x) => !(x.store === 'packaging' && x.amount === 0));
+      }
+    }
 
     if (intent === 'elaborate' && wasStatus === 'en_proceso') {
       const missing = rec.weighings.filter((w) => !isNum(w.actual) || !w.material_lot);
@@ -474,19 +505,19 @@ Object.assign(FORMS, {
       if (!isDay(rec.dispensed_date)) need.push('indica la fecha de dispensación');
       if (!isNum(rec.dispensed_qty)) need.push('indica la cantidad dispensada');
       if (need.length) {
-        await save('production', rec, 'actualizar_pesadas', rec.lot || rec.record_code);
+        await saveMany([['production', rec], ...packEntries], 'actualizar_pesadas', rec.lot || rec.record_code, packAudit);
         throw new InputError(`Para dispensarla: ${need.join(', ')}. Lo demás se ha guardado.`);
       }
       if (isDay(rec.expiry_date) && rec.dispensed_date > rec.expiry_date) throw new InputError('La fecha de dispensación es posterior a la caducidad del preparado.');
       rec.status = 'dispensada';
       rec.status_changed_at = nowIso();
-      await save('production', rec, 'marcar_dispensada', `${rec.lot}: libro recetario nº ${rec.recetario_no}`);
+      await saveMany([['production', rec], ...packEntries], 'marcar_dispensada', `${rec.lot}: libro recetario nº ${rec.recetario_no}`, packAudit);
       toast('Dispensada.');
       await route();
       return;
     }
 
-    await save('production', rec, 'actualizar_pesadas', rec.lot || rec.record_code);
+    await saveMany([['production', rec], ...packEntries], 'actualizar_pesadas', rec.lot || rec.record_code, packAudit);
     toast('Guía guardada.');
     await route();
   },
