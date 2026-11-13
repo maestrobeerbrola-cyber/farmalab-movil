@@ -260,7 +260,11 @@ async function viewProduction(id) {
     ${p.status === 'en_proceso' ? '<button class="btn block" type="submit" name="intent" value="elaborate">Marcar como elaborada</button><p class="hint">Asigna el lote, descuenta el stock de materias primas y envases y bloquea las pesadas.</p>' : ''}
     ${p.status === 'elaborada' ? '<button class="btn block" type="submit" name="intent" value="dispense">Marcar como dispensada</button><button class="btn danger block" type="button" data-act="rejectProduction" data-id="' + esc(p.uuid) + '">Rechazar el preparado</button>' : ''}
   </form>`;
-  return header + guide;
+  const receta = await docsSection('production', p.uuid, ['receta'], 'Receta', {
+    pickLabel: 'Elegir archivo', accept: RECETA_ACCEPT, camera: true, none: 'Sin receta adjunta.', submit: 'Guardar receta',
+    note: 'PDF, Word o foto. Solo se guarda en este dispositivo: no va en las copias de seguridad porque contiene datos del paciente.',
+  });
+  return header + receta + guide;
 }
 
 function updateDeviation(input) {

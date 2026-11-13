@@ -6,7 +6,7 @@
  * sincronizarlo más adelante con la versión de PC.
  */
 
-const APP_VERSION = '0.3.6';
+const APP_VERSION = '0.3.7';
 const PREVIEW = document.documentElement.dataset.preview === '1'; // copia de prueba publicada en Claude
 const DB_NAME = 'farmalab-movil';
 const EXPORT_FORMAT = 'farmalab-datos';
@@ -18,9 +18,18 @@ const DOC_TYPES = {
   pdf: { label: 'PDF', mime: 'application/pdf' },
   docx: { label: 'Word', mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' },
   doc: { label: 'Word 97-2003', mime: 'application/msword' },
+  jpg: { label: 'Foto JPG', mime: 'image/jpeg', image: true },
+  png: { label: 'Imagen PNG', mime: 'image/png', image: true },
+  webp: { label: 'Imagen WebP', mime: 'image/webp', image: true },
 };
 const DOC_ACCEPT = '.pdf,.docx,.doc,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword';
-const DOC_KINDS = { documento: 'Documento', boletin: 'Boletín de análisis', fds: 'Ficha de datos de seguridad', especificaciones: 'Especificaciones', otro: 'Otro' };
+const DOC_KINDS = { documento: 'Documento', boletin: 'Boletín de análisis', fds: 'Ficha de datos de seguridad', especificaciones: 'Especificaciones', otro: 'Otro', receta: 'Receta' };
+const RECETA_ACCEPT = `${DOC_ACCEPT},.jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp`;
+/**
+ * Las recetas llevan datos del paciente y del prescriptor: se guardan solo en este dispositivo
+ * (local_only), no van en las copias ni en la sincronización, y su nombre de archivo no pasa al registro de actividad.
+ */
+const isLocalOnly = (f) => Boolean(f && (f.local_only || f.kind === 'receta'));
 const STORES = ['material', 'packaging', 'formula', 'pnt', 'biblio', 'production', 'audit'];
 const LOCK_HIDDEN_MS = 5 * 60 * 1000;   // bloqueo tras 5 min con la app en segundo plano
 const LOCK_IDLE_MS = 15 * 60 * 1000;    // o tras 15 min sin tocar la pantalla
@@ -69,6 +78,8 @@ const ACTION_LABELS = {
   asignar_lote: 'Lote asignado',
   consumo_stock: 'Consumo de stock',
   etiqueta_generada: 'Etiqueta generada',
+  alta_receta: 'Receta adjuntada',
+  baja_receta: 'Receta eliminada',
   eliminar_formula: 'Fórmula eliminada',
   restaurar_formula: 'Fórmula restaurada',
   eliminar_pnt: 'PNT eliminado',
@@ -772,7 +783,9 @@ const lotPreview = (s, n) => `${new Date().getFullYear()}-${s.lot.letter || 'J'}
 async function viewSettings() {
   const s = await loadSettings();
   const backup = await backupStatus();
-  const docs = await getAll(FILE_STORE);
+  const allDocs = await getAll(FILE_STORE);
+  const docs = allDocs.filter((f) => !isLocalOnly(f));
+  const recetas = allDocs.length - docs.length;
   const docBytes = docs.reduce((n, f) => n + (f.size || 0), 0);
   let persisted = null; let usage = '';
   try {
@@ -795,6 +808,7 @@ async function viewSettings() {
         <label class="btn secondary">Importar copia<input type="file" accept=".json,application/json" data-import hidden></label>
       </div>
       ${docs.length ? `<p class="hint">La copia incluye ${docs.length} ${docs.length === 1 ? 'documento adjunto' : 'documentos adjuntos'} (${fmtSize(docBytes)}), así que ocupará algo más.</p>` : ''}
+      ${recetas ? `<p class="hint">Las recetas adjuntas a las elaboraciones (${recetas}) no van en la copia: contienen datos de pacientes y solo se guardan en este dispositivo.</p>` : ''}
       <p class="hint">La copia es un archivo .json que se guarda en Descargas. Guárdalo también fuera del teléfono (correo, Drive o el PC). Importar añade los registros que no tengas y actualiza los que sean más recientes; no borra nada.</p>
     </div></section>
   <form class="form" data-form="settings" novalidate>
@@ -866,6 +880,7 @@ async function buildExport() {
   for (const s of STORES) datos[s] = await getAll(s);
   datos[FILE_STORE] = [];
   for (const f of await getAll(FILE_STORE)) {
+    if (isLocalOnly(f)) continue;
     const { blob, ...meta } = f;
     datos[FILE_STORE].push({ ...meta, data: await blobToBase64(blob) });
   }
@@ -906,13 +921,14 @@ async function exportBackup(share) {
 }
 
 const ID_RE = /^(?=.{8,64}$)[A-Za-z0-9]+(-[A-Za-z0-9]+)*$/;
-const OWNER_TYPES = ['pnt', 'material', 'packaging', 'biblio'];
+const OWNER_TYPES = ['pnt', 'material', 'packaging', 'biblio'];   // dueños de documentos que viajan en las copias
 /** Documento adjunto de una copia: valida los datos y comprueba que el archivo llega íntegro (SHA-256). */
 async function importedDoc(r) {
   if (!r || typeof r !== 'object' || !ID_RE.test(String(r.uuid))) return null;
   const owner = r.owner_uuid || r.pnt_uuid;
   if (!ID_RE.test(String(owner))) return null;
   if (typeof r.updated_at !== 'string' || typeof r.name !== 'string' || !DOC_TYPES[r.ext] || typeof r.data !== 'string') return null;
+  if (isLocalOnly(r) || !OWNER_TYPES.includes(r.owner_type || 'pnt')) return null;   // las recetas no viajan entre dispositivos
   if (!/^[0-9a-f]{64}$/.test(String(r.sha256)) || r.data.length > (MAX_DOC_BYTES * 4) / 3 + 8) return null;
   let bytes;
   try { bytes = base64ToBytes(r.data); } catch { return null; }
@@ -1263,6 +1279,7 @@ async function onChange(e) {
   if (t.matches('input[data-docpick]')) {
     const out = $('[data-file-chosen]', t.closest('form'));
     const f = t.files && t.files[0];
+    if (f) $$('input[data-docpick]', t.closest('form')).forEach((other) => { if (other !== t) other.value = ''; });   // cámara o archivo: vale el último elegido
     if (out) out.textContent = f ? `${f.name} (${fmtSize(f.size)})` : 'Ningún archivo elegido';
   } else if (t.matches('input[data-import]')) {
     const file = t.files && t.files[0];

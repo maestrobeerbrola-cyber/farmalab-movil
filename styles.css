@@ -396,3 +396,6 @@ p.intro { margin: 0 4px 12px; }
 .btn.danger-outline:active { background: #fbeeec; }
 .list a.row-main { color: inherit; text-decoration: none; }
 .list a.row-main strong { color: var(--ink); }
+/* Recetas: foto o documento adjunto a la elaboración */
+.doc-image { display: block; width: 100%; height: auto; border-radius: 8px; border: 1px solid var(--line); background: #fff; }
+.filepick .actions { margin: 0; }

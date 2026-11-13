@@ -12,6 +12,9 @@ async function sniffDoc(file) {
   if (new TextDecoder('latin1').decode(head).indexOf('%PDF-') !== -1) return 'pdf';
   if (ext === 'docx' && starts([0x50, 0x4b, 0x03, 0x04])) return 'docx';
   if (ext === 'doc' && starts([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1])) return 'doc';
+  if (starts([0xff, 0xd8, 0xff])) return 'jpg';
+  if (starts([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) return 'png';
+  if (starts([0x52, 0x49, 0x46, 0x46]) && new TextDecoder('latin1').decode(head.slice(8, 12)) === 'WEBP') return 'webp';
   return null;
 }
 /** Prepara el registro de un documento adjunto a una ficha (PNT, materia prima, envase o bibliografía). */
@@ -19,7 +22,12 @@ async function buildDocRecord(file, ownerType, ownerUuid, existing, { version = 
   if (!file.size) throw new InputError('El archivo está vacío.');
   if (file.size > MAX_DOC_BYTES) throw new InputError(`El archivo ocupa ${fmtSize(file.size)}. El máximo es 25 MB.`);
   const ext = await sniffDoc(file);
-  if (!ext) throw new InputError('Solo se admiten documentos PDF (.pdf) o Word (.docx o .doc).');
+  const images = kind === 'receta';
+  if (!ext || (DOC_TYPES[ext].image && !images)) {
+    throw new InputError(images
+      ? 'Solo se admiten PDF, Word (.docx o .doc) o fotos JPG, PNG o WebP. Si la foto es HEIC (iPhone), guárdala como JPG.'
+      : 'Solo se admiten documentos PDF (.pdf) o Word (.docx o .doc).');
+  }
   const buf = await file.arrayBuffer();
   const sha256 = toHex(await crypto.subtle.digest('SHA-256', buf));
   if (existing.some((f) => f.sha256 === sha256)) throw new InputError('Ese mismo archivo ya está guardado en esta ficha.');
@@ -27,67 +35,82 @@ async function buildDocRecord(file, ownerType, ownerUuid, existing, { version = 
     uuid: newId(), owner_type: ownerType, owner_uuid: ownerUuid, ...(ownerType === 'pnt' ? { pnt_uuid: ownerUuid } : {}),
     kind: DOC_KINDS[kind] ? kind : 'documento', name: file.name.slice(0, 200), ext, mime: DOC_TYPES[ext].mime,
     size: file.size, version, sha256, uploaded_by: state.profile.name,
+    ...(images ? { local_only: true } : {}),
     blob: new Blob([buf], { type: DOC_TYPES[ext].mime }),
   };
 }
-const filePicker = (label) => `<div class="filepick">
-    <label class="btn secondary">${esc(label)}<input type="file" name="file" accept="${DOC_ACCEPT}" data-docpick hidden></label>
+const filePicker = (label, { accept = DOC_ACCEPT, camera = false } = {}) => `<div class="filepick">
+    <div class="actions">
+      ${camera ? '<label class="btn secondary">Hacer foto<input type="file" name="file_cam" accept="image/*" capture="environment" data-docpick hidden></label>' : ''}
+      <label class="btn secondary">${esc(label)}<input type="file" name="file" accept="${accept}" data-docpick hidden></label>
+    </div>
     <p class="hint" data-file-chosen>Ningún archivo elegido</p>
   </div>`;
+/** Archivo elegido en el formulario (con el selector o con la cámara). */
+const pickedFile = (form) => (form.elements.file && form.elements.file.files[0]) || (form.elements.file_cam && form.elements.file_cam.files[0]) || null;
 function docRow(f, current) {
   return `<li><a class="row" href="#documento--${esc(f.uuid)}"><div class="row-main"><strong>${esc(f.name)}</strong><span class="sub"><span class="doc-tag">${esc(DOC_TYPES[f.ext].label)}</span>${f.kind && f.kind !== 'documento' ? `<span>${esc(DOC_KINDS[f.kind])}</span>` : ''}${f.version ? `<span>Versión ${esc(f.version)}</span>` : ''}<span>${esc(fmtStamp(f.created_at).slice(0, 10))}</span><span>${fmtSize(f.size)}</span></span></div>${current ? '<span class="pill green">Vigente</span>' : ''}</a></li>`;
 }
-/** Bloque de documentos adjuntos para fichas de materias primas, envases y bibliografía. */
-async function docsSection(ownerType, ownerUuid, kinds, title = 'Documentos') {
+/** Bloque de documentos adjuntos para fichas de materias primas, envases, bibliografía y recetas de las elaboraciones. */
+async function docsSection(ownerType, ownerUuid, kinds, title = 'Documentos', { pickLabel = 'Adjuntar PDF o Word', accept = DOC_ACCEPT, camera = false, note = '', none = 'Sin documentos adjuntos.', submit = 'Guardar documento' } = {}) {
   const docs = (await docsOf(ownerUuid)).sort(latestFirst);
   return `<section><h2>${esc(title)}</h2>
-    ${docs.length ? `<ul class="list">${docs.map((f) => docRow(f, false)).join('')}</ul>` : '<p class="hint none-docs">Sin documentos adjuntos.</p>'}
+    ${docs.length ? `<ul class="list">${docs.map((f) => docRow(f, false)).join('')}</ul>` : `<p class="hint none-docs">${esc(none)}</p>`}
     <form class="panel form spaced" data-form="docUpload" data-owner-type="${ownerType}" data-owner-id="${esc(ownerUuid)}" novalidate>
       ${formMsg()}
-      ${filePicker('Adjuntar PDF o Word')}
+      ${filePicker(pickLabel, { accept, camera })}
+      ${note ? `<p class="hint">${note}</p>` : ''}
       ${kinds.length > 1 ? field('Tipo de documento', `<select name="kind">${options(kinds, kinds[0], DOC_KINDS)}</select>`) : `<input type="hidden" name="kind" value="${kinds[0]}">`}
-      <button class="btn secondary block" type="submit">Guardar documento</button>
+      <button class="btn secondary block" type="submit">${esc(submit)}</button>
     </form></section>`;
 }
-const DOC_ACTION = { pnt: 'alta_documento_pnt', material: 'alta_documento', packaging: 'alta_documento', biblio: 'alta_documento' };
+const DOC_ACTION = { pnt: 'alta_documento_pnt', material: 'alta_documento', packaging: 'alta_documento', biblio: 'alta_documento', production: 'alta_receta' };
 Object.assign(FORMS, {
   async docUpload(form) {
     const { ownerType, ownerId } = form.dataset;
-    if (!OWNER_TYPES.includes(ownerType)) return;
+    if (!DOC_ACTION[ownerType]) return;
     const owner = await getOne(ownerType, ownerId);
     if (!owner) throw new InputError('Esta ficha ya no existe.');
-    const file = form.elements.file.files[0];
-    if (!file) throw new InputError('Elige un archivo PDF o Word.');
-    const doc = await buildDocRecord(file, ownerType, ownerId, await docsOf(ownerId), { kind: form.elements.kind.value });
-    await saveMany([[FILE_STORE, doc]], DOC_ACTION[ownerType], `${owner.name || owner.title || owner.code}: ${DOC_KINDS[doc.kind]} ${doc.name}`);
-    toast('Documento guardado.');
+    const file = pickedFile(form);
+    const kind = ownerType === 'production' ? 'receta' : form.elements.kind.value;
+    if (!file) throw new InputError(kind === 'receta' ? 'Haz una foto o elige el archivo de la receta.' : 'Elige un archivo PDF o Word.');
+    const doc = await buildDocRecord(file, ownerType, ownerId, await docsOf(ownerId), { kind });
+    // de la receta no se anota el nombre del archivo: puede llevar el nombre del paciente
+    const detail = kind === 'receta'
+      ? `${owner.lot || owner.record_code}: receta (${DOC_TYPES[doc.ext].label}, ${fmtSize(doc.size)})`
+      : `${owner.name || owner.title || owner.code}: ${DOC_KINDS[doc.kind]} ${doc.name}`;
+    await saveMany([[FILE_STORE, doc]], DOC_ACTION[ownerType], detail);
+    toast(kind === 'receta' ? 'Receta guardada en este dispositivo.' : 'Documento guardado.');
     await route();
   },
 });
 
 // ------------------------------------------------------------------ visor de documentos
-const OWNER_ROUTE = { pnt: 'pnt', material: 'materias', packaging: 'envases', biblio: 'biblio' };
+const OWNER_ROUTE = { pnt: 'pnt', material: 'materias', packaging: 'envases', biblio: 'biblio', production: 'elaboraciones' };
 async function ownerLabel(doc) {
   const store = doc.owner_type || 'pnt';
   const o = await getOne(store, doc.owner_uuid || doc.pnt_uuid);
   if (!o) return doc.name;
   if (store === 'pnt') return `${o.code} ${o.title}`;
   if (store === 'biblio') return o.title;
+  if (store === 'production') return `${o.lot || o.record_code} · ${o.formula_name}`;
   return `${o.name}${o.lot ? `, lote ${o.lot}` : ''}`;
 }
 async function viewDocument(id) {
   const doc = await getOne(FILE_STORE, id);
   if (!doc) return empty('Este documento no existe.', '');
   state.parent = `#${OWNER_ROUTE[doc.owner_type || 'pnt']}--${doc.owner_uuid || doc.pnt_uuid}`;
-  const canShare = doc.ext === 'pdf' && navigator.canShare
-    && navigator.canShare({ files: [new File([''], 'x.pdf', { type: 'application/pdf' })] });
+  const canShare = (doc.ext === 'pdf' || DOC_TYPES[doc.ext].image) && navigator.canShare
+    && navigator.canShare({ files: [new File([''], `x.${doc.ext}`, { type: doc.mime })] });
   return `<div class="doc-head">
     <strong>${esc(await ownerLabel(doc))}</strong>
     <span class="sub"><span>${esc(DOC_KINDS[doc.kind] || 'Documento')}</span><span>${esc(doc.name)}</span>${doc.version ? `<span>Versión ${esc(doc.version)}</span>` : ''}<span>${fmtSize(doc.size)}</span></span>
     <div class="actions">
       <button class="btn secondary small" data-act="downloadDoc" data-id="${esc(doc.uuid)}">Descargar</button>
       ${canShare ? `<button class="btn secondary small" data-act="shareDoc" data-id="${esc(doc.uuid)}">Abrir con otra app</button>` : ''}
+      ${isLocalOnly(doc) ? `<button class="btn danger-outline small" data-act="deleteDoc" data-id="${esc(doc.uuid)}">Eliminar</button>` : ''}
     </div>
+    ${isLocalOnly(doc) ? '<p class="hint">Solo está en este dispositivo: no va en las copias de seguridad.</p>' : ''}
   </div>
   <div id="docview" class="docview" data-id="${esc(doc.uuid)}"><p class="hint">Abriendo el documento...</p></div>`;
 }
@@ -98,6 +121,7 @@ async function renderDocument(container) {
   try {
     if (doc.ext === 'pdf') await renderPdf(container, doc);
     else if (doc.ext === 'docx') await renderDocx(container, doc);
+    else if (DOC_TYPES[doc.ext] && DOC_TYPES[doc.ext].image) renderImage(container, doc);
     else {
       container.innerHTML = `<div class="msg warn">Los documentos .doc (Word 97-2003) no se pueden mostrar dentro de la app. Pulsa «Descargar» para abrirlo con Word, o guárdalo como .docx o PDF y súbelo de nuevo.</div>`;
     }
@@ -182,6 +206,17 @@ async function renderPdf(container, doc) {
   slots.forEach(({ slot }) => observer.observe(slot));
 }
 
+function renderImage(container, doc) {
+  const url = URL.createObjectURL(doc.blob);
+  state.objectUrls.push(url);
+  container.innerHTML = '<p class="hint pages">Pellizca para ampliar.</p>';
+  const img = document.createElement('img');
+  img.className = 'doc-image';
+  img.src = url;
+  img.alt = DOC_KINDS[doc.kind] || 'Imagen';
+  container.append(img);
+}
+
 let mammothPromise = null;
 function loadMammoth() {
   if (!mammothPromise) {
@@ -241,6 +276,25 @@ function sanitizeDocHtml(html) {
 const DOCS_TABS = [['#pnt', 'PNT'], ['#biblio', 'Bibliografía']];
 ROUTES.pnt = (arg, extra) => (arg === 'nuevo' ? viewPntForm() : arg && extra === 'editar' ? viewPntForm(arg) : arg ? viewPnt(arg) : viewPnts());
 ROUTES.documento = (arg) => viewDocument(arg);
+
+Object.assign(ACTIONS, {
+  /** Solo se pueden borrar los archivos que no viajan en las copias (recetas): los demás quedan como historial. */
+  deleteDoc: async (el) => {
+    const doc = await getOne(FILE_STORE, el.dataset.id);
+    if (!doc || !isLocalOnly(doc)) return;
+    const owner = await getOne(doc.owner_type, doc.owner_uuid);
+    const ok = await ask({ title: 'Eliminar receta', message: 'Se borrará de este dispositivo y no se podrá recuperar.', confirmLabel: 'Eliminar', danger: true });
+    if (!ok) return;
+    const stamp = nowIso();
+    await tx([FILE_STORE, 'audit', 'meta'], 'readwrite', (t) => {
+      t.objectStore(FILE_STORE).delete(doc.uuid);
+      t.objectStore('audit').put(auditEntry('baja_receta', `${owner ? owner.lot || owner.record_code : 'Elaboración'}: receta (${DOC_TYPES[doc.ext].label})`, stamp));
+      t.objectStore('meta').put(stamp, 'lastChange');
+    });
+    toast('Receta eliminada.');
+    location.hash = `#${OWNER_ROUTE[doc.owner_type] || 'inicio'}--${doc.owner_uuid}`;
+  },
+});
 AFTER_RENDER.push(() => { const v = $('#docview'); if (v) renderDocument(v); });
 
 async function viewPnts() {

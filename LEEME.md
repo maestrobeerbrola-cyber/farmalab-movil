@@ -1,4 +1,4 @@
-# FARMA·LAB móvil v0.3.6 (prototipo)
+# FARMA·LAB móvil v0.3.7 (prototipo)
 
 App para Android que se instala desde Chrome y funciona sin conexión. Todos los datos se guardan **en el propio teléfono**.
 
@@ -13,6 +13,10 @@ App para Android que se instala desde Chrome y funciona sin conexión. Todos los
 - **Precio de las fórmulas financiadas** (Comunidad de Madrid), ver abajo.
 - **Documentos**: PNT y bibliografía con su PDF o Word, que se consultan dentro de la app, también sin conexión.
 - Registro de actividad, bloqueo con PIN, exportar e importar copias.
+
+## Novedades de la v0.3.7
+- **Receta en cada elaboración**: apartado «Receta» para adjuntar la receta en PDF, Word o foto (botón «Hacer foto» con la cámara, o «Elegir archivo»). Se ve dentro de la app y se puede eliminar.
+- Las recetas **solo se guardan en este dispositivo**: no van en las copias de seguridad ni en la sincronización, porque contienen datos del paciente. En el registro de actividad no se anota el nombre del archivo.
 
 ## Novedades de la v0.3.6
 - Arreglo: en las listas con buscador (fórmulas, almacén, PNT, precio tasado...), la barra de búsqueda tapaba el primer elemento. Ahora queda fija bajo la cabecera y la lista empieza debajo.
@@ -96,7 +100,7 @@ Visor de PDF: pdf.js de Mozilla (Apache 2.0). Lector de Word: mammoth (BSD). Gen
 
 ## Límites importantes
 - Es un prototipo técnico, no un sistema validado ni un libro oficial de registro.
-- No guardes datos identificativos ni clínicos de pacientes en las fichas. En la etiqueta se escriben al imprimir y no se guardan.
+- No guardes datos identificativos ni clínicos de pacientes en las fichas. En la etiqueta y la ficha de registro se escriben al imprimir y no se guardan. Las recetas adjuntas sí contienen esos datos: se quedan solo en el dispositivo, protegidas por el PIN, pero sin cifrar; mantén activado el bloqueo del teléfono y del PC.
 - La calculadora y la valoración son ayudas: el farmacéutico responsable debe revisar cantidades y precios.
 - Según la AEMPS, su web corporativa no se actualiza desde el 9 de junio de 2026. Los enlaces de alertas abren su buscador; las alertas nuevas hay que consultarlas por los canales que indique la AEMPS.
 - Antes de usarla de verdad hace falta una revisión técnica, pruebas, copias restaurables, validación y una evaluación de protección de datos.
