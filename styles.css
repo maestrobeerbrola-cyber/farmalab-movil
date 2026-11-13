@@ -399,3 +399,7 @@ p.intro { margin: 0 4px 12px; }
 /* Recetas: foto o documento adjunto a la elaboración */
 .doc-image { display: block; width: 100%; height: auto; border-radius: 8px; border: 1px solid var(--line); background: #fff; }
 .filepick .actions { margin: 0; }
+/* Campo numérico con su unidad (años) */
+.withunit { display: flex; align-items: center; gap: 8px; }
+.withunit input { flex: 1; min-width: 0; }
+.withunit span { color: var(--muted); }

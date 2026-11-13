@@ -70,6 +70,7 @@ async function viewMaterial(id) {
   const expired = isDay(m.expiry) && daysUntil(m.expiry) < 0;
   const used = (await getAll('production')).filter((p) => (p.weighings || []).some((w) => w.material_uuid === m.uuid || (w.material_lot && lc(w.material_lot) === lc(m.lot) && fold(w.ingredient) === fold(m.name))));
   const q = encodeURIComponent(m.name);
+  const retFact = await retentionFact('material', m);
   return `<div class="panel">
     <div class="head-row"><h2 class="big">${esc(m.name)}</h2>${pill('material', m.status)}</div>
     ${facts([
@@ -84,6 +85,7 @@ async function viewMaterial(id) {
       ['Caducidad', `${fmtDay(m.expiry)}${expired ? ' <span class="bad">caducado</span>' : ''}`],
       ['Decisión', m.decision_date ? `${esc(STATUS.material[m.status])} el ${fmtDay(m.decision_date)} por ${esc(m.decision_by)}` : '<span class="warn">Pendiente</span>'],
       m.code ? ['Código de artículo', val(m.code)] : null,
+      retFact,
     ])}
     ${totalLine}
     <div class="actions spaced"><a class="btn secondary small" href="#materias--${esc(m.uuid)}--editar">Editar ficha</a></div>
@@ -322,6 +324,7 @@ async function viewPackaging(id) {
   const p = await getOne('packaging', id);
   if (!p) return empty('Este material no existe.', '');
   const used = (await getAll('production')).filter((x) => (x.packaging_used || []).some((u) => u.packaging_uuid === p.uuid));
+  const retFact = await retentionFact('packaging', p);
   return `<div class="panel">
     <div class="head-row"><h2 class="big">${esc(p.name)}</h2>${pill('packaging', p.status)}</div>
     ${facts([
@@ -336,6 +339,7 @@ async function viewPackaging(id) {
       ['Conservación', val(p.storage)],
       ['Inspección', inspectionDone(p.inspection) ? `Correcta${p.inspection.by ? `, por ${esc(p.inspection.by)}` : ''}${isDay(p.inspection.date) ? ` el ${fmtDay(p.inspection.date)}` : ''}` : '<span class="warn">Sin completar</span>'],
       ['Decisión', p.decision_date ? `${esc(STATUS.packaging[p.status])} el ${fmtDay(p.decision_date)} por ${esc(p.decision_by)}` : '<span class="warn">Pendiente</span>'],
+      retFact,
     ])}
     ${p.observations ? `<p class="pre spaced">${esc(p.observations)}</p>` : ''}
     <div class="actions spaced"><a class="btn secondary small" href="#envases--${esc(p.uuid)}--editar">Editar ficha</a></div>

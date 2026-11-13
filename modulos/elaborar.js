@@ -155,6 +155,7 @@ async function viewProduction(id) {
   const tests = (qc.tests && qc.tests.length) ? qc.tests : s.qc_tests.map((t) => ({ test: t }));
   const equipment = [...new Set([...(s.equipment || []), ...(p.equipment || [])])];
   const tasado = p.cn ? await tasadoFor(p.cn.cn) : null;
+  const retFact = await retentionFact('production', p);
 
   const header = `<div class="panel">
     <div class="head-row"><h2 class="big">${esc(p.lot || p.record_code)}</h2>${pill('production', p.status)}</div>
@@ -170,6 +171,7 @@ async function viewProduction(id) {
       ['Elaborador', val(p.operator)],
       ['Inicio', esc(fmtStamp(p.created_at))],
       p.status === 'dispensada' ? ['Dispensada', `${fmtDay(p.dispensed_date)} · Libro recetario nº ${val(p.recetario_no)}`] : null,
+      retFact,
     ])}
   </div>
   ${stale >= STALE_PRODUCTION_DAYS ? `<p class="msg warn">En proceso desde hace ${stale} días sin cambiar de estado.</p>` : ''}

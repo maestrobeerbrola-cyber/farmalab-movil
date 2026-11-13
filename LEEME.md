@@ -1,4 +1,4 @@
-# FARMA·LAB móvil v0.3.8 (prototipo)
+# FARMA·LAB móvil v0.3.9 (prototipo)
 
 App para Android que se instala desde Chrome y funciona sin conexión. Todos los datos se guardan **en el propio teléfono**.
 
@@ -13,6 +13,14 @@ App para Android que se instala desde Chrome y funciona sin conexión. Todos los
 - **Precio de las fórmulas financiadas** (Comunidad de Madrid), ver abajo.
 - **Documentos**: PNT y bibliografía con su PDF o Word, que se consultan dentro de la app, también sin conexión.
 - Registro de actividad, bloqueo con PIN, exportar e importar copias.
+
+## Novedades de la v0.3.9
+- **Conservación de registros con borrado automático.** Plazos desde la caducidad: elaboraciones 1 año (2 si contienen psicótropos; 5 si contienen estupefacientes o son de uso veterinario); materias primas y material de acondicionamiento, 1 año. Se cambian en Ajustes.
+- La clase de cada fórmula (general, psicótropos, estupefacientes, uso veterinario) se elige en la fórmula y la heredan sus elaboraciones.
+- **Aviso 30 días antes** en Inicio y en Ajustes → Conservación. Un registro nunca se borra sin haber estado avisado al menos 30 días, aunque su plazo ya hubiera pasado.
+- El borrado se hace al abrir la app (una vez al día) e incluye sus documentos (recetas, boletines...). Queda anotado en el registro de actividad.
+- Un lote de materia prima o de envase se conserva mientras se conserve alguna elaboración que lo usó. Sin fecha de caducidad no se borra.
+- «No borrar» en la ficha o en Conservación excluye un registro del borrado. En Ajustes se puede desactivar el borrado y dejar solo los avisos.
 
 ## Novedades de la v0.3.8
 - **Código nacional en la etiqueta**, debajo del nombre de la fórmula («C.N. 500017»). Al generar la etiqueta se elige entre los códigos de la fórmula; por defecto, el de la elaboración o el de la presentación con la misma cantidad. Si la elaboración no tenía código, el elegido se guarda también en ella. Si la fórmula no tiene códigos, se puede escribir a mano.

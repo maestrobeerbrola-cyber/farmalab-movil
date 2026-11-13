@@ -6,7 +6,7 @@
  * sincronizarlo más adelante con la versión de PC.
  */
 
-const APP_VERSION = '0.3.8';
+const APP_VERSION = '0.3.9';
 const PREVIEW = document.documentElement.dataset.preview === '1'; // copia de prueba publicada en Claude
 const DB_NAME = 'farmalab-movil';
 const EXPORT_FORMAT = 'farmalab-datos';
@@ -78,6 +78,9 @@ const ACTION_LABELS = {
   asignar_lote: 'Lote asignado',
   consumo_stock: 'Consumo de stock',
   etiqueta_generada: 'Etiqueta generada',
+  borrado_conservacion: 'Borrado por fin del plazo de conservación',
+  conservar_registro: 'Marcado para no borrar',
+  permitir_borrado: 'Permitido el borrado por plazo',
   alta_receta: 'Receta adjuntada',
   baja_receta: 'Receta eliminada',
   eliminar_formula: 'Fórmula eliminada',
@@ -113,6 +116,7 @@ const SECTIONS = {
   documento: { title: 'Documento', tab: 4 },
   calculadora: { title: 'Calculadora' },
   papelera: { title: 'Papelera' },
+  conservacion: { title: 'Conservación' },
   valoracion: { title: 'Valoración' },
   ajustes: { title: 'Ajustes' },
   auditoria: { title: 'Actividad' },
@@ -133,6 +137,8 @@ const DEFAULT_SETTINGS = {
   mp_qc_tests: DEFAULT_MP_QC_TESTS,
   label: { layout: '8', all_components: false },
   pricing: { p_factor: 3.65, iva: 4 },     // factor P 2026 (Anexo 3 del Convenio con la Comunidad de Madrid) e IVA de medicamentos
+  // años de conservación desde la caducidad y días de aviso antes de borrar
+  retention: { enabled: true, production: { general: 1, psicotropo: 2, estupefaciente: 5, veterinaria: 5 }, material: 1, packaging: 1, notice_days: 30 },
   updated_at: '',
 };
 
@@ -174,6 +180,8 @@ const CHANGE_HOOKS = [];
 const STATUS_CHECKS = {};   // comprobaciones antes de cambiar de estado: store -> async (registro, estado) => opciones de ask() o null
 const ROW_BUILDERS = {};    // filas repetibles de los formularios (data-act="addRow" data-kind="...")
 const DELETE_CHECKS = {};   // antes de eliminar: store -> async (registro) => { message, block } (block impide eliminar)
+const ALERT_SOURCES = [];   // avisos adicionales de los módulos: async () => [{ tone, kind, title, text, href }]
+const AFTER_UNLOCK = [];    // tareas al desbloquear la app (p. ej. borrado por fin del plazo de conservación)
 const RESTORE_CHECKS = {};  // antes de restaurar: store -> async (registro) => mensaje de error o null
 
 // ------------------------------------------------------------------ utilidades
@@ -363,7 +371,16 @@ async function loadSettings() {
     lot: { ...DEFAULT_SETTINGS.lot, ...(saved.lot || {}) },
     label: { ...DEFAULT_SETTINGS.label, ...(saved.label || {}) },
     pricing: { ...DEFAULT_SETTINGS.pricing, ...(saved.pricing || {}) },
+    retention: {
+      ...DEFAULT_SETTINGS.retention, ...(saved.retention || {}),
+      production: { ...DEFAULT_SETTINGS.retention.production, ...((saved.retention && saved.retention.production) || {}) },
+    },
   };
+  const okYears = (n) => Number.isInteger(n) && n >= 1 && n <= 30;
+  for (const k of Object.keys(DEFAULT_SETTINGS.retention.production)) if (!okYears(s.retention.production[k])) s.retention.production[k] = DEFAULT_SETTINGS.retention.production[k];
+  for (const k of ['material', 'packaging']) if (!okYears(s.retention[k])) s.retention[k] = DEFAULT_SETTINGS.retention[k];
+  if (!(Number.isInteger(s.retention.notice_days) && s.retention.notice_days >= 30 && s.retention.notice_days <= 365)) s.retention.notice_days = DEFAULT_SETTINGS.retention.notice_days;
+  s.retention.enabled = s.retention.enabled !== false;
   if (!(isNum(s.pricing.p_factor) && s.pricing.p_factor > 0)) s.pricing.p_factor = DEFAULT_SETTINGS.pricing.p_factor;
   if (!(isNum(s.pricing.iva) && s.pricing.iva >= 0)) s.pricing.iva = DEFAULT_SETTINGS.pricing.iva;
   state.settings = s;
@@ -425,6 +442,7 @@ const formMsg = () => '<div class="msg error" data-formmsg hidden role="alert"><
 const field = (label, input, hint = '') => `<label class="field"><span>${label}</span>${input}${hint ? `<span class="hint">${hint}</span>` : ''}</label>`;
 const text = (name, attrs = '') => `<input type="text" name="${name}" ${attrs}>`;
 const decimal = (name, attrs = '') => `<input type="text" inputmode="decimal" autocomplete="off" name="${name}" ${attrs}>`;
+const yearsInput = (name, v) => `<div class="withunit"><input type="text" inputmode="numeric" autocomplete="off" name="${name}" value="${esc(v)}" maxlength="2"><span>años</span></div>`;
 
 function toast(message) {
   const t = $('#toast');
@@ -530,6 +548,9 @@ async function unlockDone() {
     $('#shell').inert = false;
   }
   logOnly('inicio_sesion', state.profile.name).catch(() => {});
+  for (const task of AFTER_UNLOCK) {
+    try { await task(); } catch (err) { console.error(err); }
+  }
 }
 function setupLockTimers() {
   document.addEventListener('visibilitychange', () => {
@@ -657,7 +678,7 @@ async function renderRoute() {
   if (parts[0] === 'inicio') parts[0] = '';
   const [sec = '', arg = '', extra = ''] = parts;
   const info = SECTIONS[sec] || SECTIONS[''];
-  state.parent = arg ? `#${sec}` : (['auditoria', 'papelera'].includes(sec) ? '#ajustes' : '#inicio');
+  state.parent = arg ? `#${sec}` : (['auditoria', 'papelera', 'conservacion'].includes(sec) ? '#ajustes' : '#inicio');
   let html;
   try {
     const handler = ROUTES[sec];
@@ -671,7 +692,7 @@ async function renderRoute() {
   state.objectUrls = [];
   $('#view').innerHTML = html;
   $('#title').textContent = info.title;
-  const sub = Boolean(arg) || ['ajustes', 'auditoria', 'papelera', 'calculadora', 'valoracion', 'etiqueta'].includes(sec);
+  const sub = Boolean(arg) || ['ajustes', 'auditoria', 'papelera', 'conservacion', 'calculadora', 'valoracion', 'etiqueta'].includes(sec);
   $('#backBtn').hidden = !sub;
   $('#mark').hidden = sub;
   $$('.tabbar a').forEach((a, i) => {
@@ -723,6 +744,9 @@ async function computeAlerts() {
       const missing = pendingItems(p);
       if (missing.length) out.push({ tone: 'amber', kind: 'Faltan datos', title: `${p.lot || p.record_code} ${p.formula_name}`, text: missing.join(', '), href: `#elaboraciones--${p.uuid}` });
     }
+  }
+  for (const src of ALERT_SOURCES) {
+    try { out.push(...(await src())); } catch (err) { console.error(err); }
   }
   return out;
 }
@@ -839,6 +863,20 @@ async function viewSettings() {
       </div>
       <p class="hint">Honorarios del Anexo 3 del Convenio con la Comunidad de Madrid. El factor P se actualiza cada enero con el IPC (2026: 3,65 €).</p>
     </div></section>
+    <section><h2>Conservación de registros</h2><div class="panel form">
+      <p class="hint">Años que se conservan después de la caducidad. Cumplido el plazo, el registro y sus documentos se borran solos, con aviso previo.</p>
+      <div class="grid2">
+        ${field('Elaboraciones', yearsInput('ret_general', s.retention.production.general))}
+        ${field('Con psicótropos', yearsInput('ret_psicotropo', s.retention.production.psicotropo))}
+        ${field('Con estupefacientes', yearsInput('ret_estupefaciente', s.retention.production.estupefaciente))}
+        ${field('Uso veterinario', yearsInput('ret_veterinaria', s.retention.production.veterinaria))}
+        ${field('Materias primas', yearsInput('ret_material', s.retention.material))}
+        ${field('Acondicionamiento', yearsInput('ret_packaging', s.retention.packaging))}
+      </div>
+      ${field('Días de aviso antes de borrar', `<input type="text" inputmode="numeric" name="ret_notice" value="${esc(s.retention.notice_days)}" maxlength="3">`, 'Mínimo 30.')}
+      ${checkbox('ret_enabled', 'Borrar automáticamente al cumplir el plazo', s.retention.enabled)}
+      <p class="hint">Si lo desactivas, solo se muestran los avisos. La clase de cada fórmula (psicótropos, estupefacientes, uso veterinario) se elige en la propia fórmula.</p>
+    </div></section>
     <section><h2>Utillaje y controles habituales</h2><div class="panel form">
       ${field('Utillaje del laboratorio', `<textarea name="equipment" rows="6">${esc(s.equipment.join('\n'))}</textarea>`, 'Uno por línea. Se ofrece al registrar cada elaboración.')}
       ${field('Pruebas de control de calidad', `<textarea name="qc_tests" rows="4">${esc(s.qc_tests.join('\n'))}</textarea>`, 'Una por línea. Aparecen en el control de calidad de cada elaboración.')}
@@ -859,7 +897,7 @@ async function viewSettings() {
       ${persisted === true ? '' : '<button class="btn secondary" data-act="persist">Proteger datos</button><p class="hint">Si Chrome no lo permite, instala primero la app en la pantalla de inicio y vuelve a intentarlo.</p>'}
       ${standalone ? '<p class="hint">App instalada en el teléfono.</p>' : state.deferredInstall ? '<button class="btn secondary" data-act="install">Instalar en el teléfono</button>' : '<p class="hint">Para instalarla: menú de Chrome (⋮) y «Instalar aplicación».</p>'}
     </div></section>
-  <section><h2>Actividad</h2><ul class="list"><li><a class="row" href="#auditoria"><span class="row-main">Ver el registro de actividad</span></a></li><li><a class="row" href="#papelera"><span class="row-main">Papelera: fórmulas y PNT eliminados</span></a></li></ul></section>
+  <section><h2>Actividad</h2><ul class="list"><li><a class="row" href="#auditoria"><span class="row-main">Ver el registro de actividad</span></a></li><li><a class="row" href="#papelera"><span class="row-main">Papelera: fórmulas y PNT eliminados</span></a></li><li><a class="row" href="#conservacion"><span class="row-main">Conservación: borrados programados</span></a></li></ul></section>
   <section><h2>Acerca de</h2><div class="panel"><dl class="facts">
       <dt>Versión</dt><dd>FARMA·LAB móvil ${APP_VERSION}</dd>
       <dt>Usuario</dt><dd>${esc(state.profile.name)}</dd>
@@ -1004,7 +1042,7 @@ async function importBackup(file) {
   let newSettings = null;
   if (incomingSettings) {
     const takeIncoming = String(incomingSettings.updated_at || '') > String(local.updated_at || '');
-    const merged = takeIncoming ? { ...local, ...incomingSettings, pharmacy: { ...local.pharmacy, ...(incomingSettings.pharmacy || {}) }, label: { ...local.label, ...(incomingSettings.label || {}) }, pricing: { ...local.pricing, ...(incomingSettings.pricing || {}) } } : { ...local };
+    const merged = takeIncoming ? { ...local, ...incomingSettings, pharmacy: { ...local.pharmacy, ...(incomingSettings.pharmacy || {}) }, label: { ...local.label, ...(incomingSettings.label || {}) }, pricing: { ...local.pricing, ...(incomingSettings.pricing || {}) }, retention: { ...local.retention, ...(incomingSettings.retention || {}), production: { ...local.retention.production, ...((incomingSettings.retention && incomingSettings.retention.production) || {}) } } } : { ...local };
     const nextLot = Math.max(Number(local.lot.next) || 1, Number(incomingSettings.lot && incomingSettings.lot.next) || 1);
     merged.lot = { ...(takeIncoming ? { ...local.lot, ...(incomingSettings.lot || {}) } : local.lot), next: nextLot };
     if (!Array.isArray(merged.equipment)) merged.equipment = local.equipment;
@@ -1219,6 +1257,21 @@ const FORMS = {
     if (!Number.isInteger(next) || next < 1 || next > 9999999) throw new InputError('El próximo número de lote debe ser un número entero mayor que cero.');
     const letter = str(d.lot_letter).toUpperCase();
     if (!/^[A-Z0-9]{1,4}$/.test(letter)) throw new InputError('La letra del lote solo puede tener letras o números (por ejemplo, J).');
+    const years = (k, label) => {
+      const n = Number(str(d[k]));
+      if (!Number.isInteger(n) || n < 1 || n > 30) throw new InputError(`${label}: escribe un número entero de años entre 1 y 30.`);
+      return n;
+    };
+    const retention = {
+      enabled: d.ret_enabled === 'on',
+      production: {
+        general: years('ret_general', 'Elaboraciones'), psicotropo: years('ret_psicotropo', 'Con psicótropos'),
+        estupefaciente: years('ret_estupefaciente', 'Con estupefacientes'), veterinaria: years('ret_veterinaria', 'Uso veterinario'),
+      },
+      material: years('ret_material', 'Materias primas'), packaging: years('ret_packaging', 'Acondicionamiento'),
+      notice_days: Number(str(d.ret_notice)),
+    };
+    if (!Number.isInteger(retention.notice_days) || retention.notice_days < 30 || retention.notice_days > 365) throw new InputError('Los días de aviso deben ser un número entre 30 y 365.');
     const pFactor = parseNum(d.p_factor, 'Factor P');
     if (!(pFactor > 0 && pFactor < 100)) throw new InputError('El factor P debe ser un importe en euros mayor que cero (por ejemplo, 3,65).');
     const iva = parseNum(d.iva, 'IVA');
@@ -1232,6 +1285,7 @@ const FORMS = {
       lot: { letter, next },
       label: { layout: d.label_layout === '2' ? '2' : '8', all_components: d.label_all === 'on' },
       pricing: { p_factor: pFactor, iva },
+      retention,
       equipment: lines(d.equipment),
       qc_tests: lines(d.qc_tests),
       mp_qc_tests: lines(d.mp_qc_tests),

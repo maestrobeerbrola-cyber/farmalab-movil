@@ -35,6 +35,7 @@ async function viewFormula(id) {
       ['Vía de administración', val(f.route)],
       ['Conservación', val(f.storage)],
       ['Plazo de validez', isNum(f.validity_days) ? `${f.validity_days} días` : '—'],
+      ['Conservación de las elaboraciones', esc(RETENTION_CLASSES[f.retention_class] || RETENTION_CLASSES.general)],
       ['Lote de referencia', `${fmtNum(f.target_amount)} ${esc(f.unit)}`],
       ['Referencia', val(f.reference)],
     ])}
@@ -85,6 +86,7 @@ function cnRow(c = {}) {
   </div>`;
 }
 async function viewFormulaForm(id) {
+  await loadSettings();   // años de conservación en las opciones de clase
   const f = id ? await getOne('formula', id) : null;
   if (id && !f) return empty('Esta fórmula no existe.', '');
   if (f && f.deleted_at) return `${deletedBanner('formula', f)}<p class="hint">Restáurala para poder editarla.</p>`;
@@ -104,6 +106,7 @@ async function viewFormulaForm(id) {
       ${field('Versión', text('version', `value="${esc(v.version || '1')}" maxlength="30"`))}
     </div>
     ${field('Tipo', `<select name="type">${options(Object.keys(FORMULA_TYPES), v.type || 'fm', FORMULA_TYPES)}</select>`)}
+    ${field('Conservación de las elaboraciones', `<select name="retention_class">${options(Object.keys(RETENTION_CLASSES), v.retention_class || 'general', RETENTION_LABELS())}</select>`, 'Cuánto tiempo se guardan sus elaboraciones después de su caducidad. Los años se cambian en Ajustes.')}
     <div class="grid2">
       ${field('Forma farmacéutica', text('form', `value="${esc(v.form || '')}" maxlength="80" placeholder="Crema, solución, cápsulas..."`))}
       ${field('Vía de administración', text('route', `value="${esc(v.route || '')}" maxlength="80" placeholder="Tópica, oral..."`))}
@@ -206,6 +209,7 @@ Object.assign(FORMS, {
       ...(prev || { uuid: newId(), status: STATUS.formula[d.status] ? d.status : 'borrador' }),
       name: name.slice(0, 160), code: str(d.code).slice(0, 80), version: str(d.version).slice(0, 30) || '1',
       type: FORMULA_TYPES[d.type] ? d.type : 'fm', form: str(d.form).slice(0, 80), route: str(d.route).slice(0, 80),
+      retention_class: RETENTION_CLASSES[d.retention_class] ? d.retention_class : 'general',
       storage: str(d.storage).slice(0, 160), validity_days: validity, reference: str(d.reference).slice(0, 200),
       target_amount: target, unit: FORMULA_UNITS.includes(d.unit) ? d.unit : 'g', components, national_codes,
       // los PNT en la papelera no salen en la lista, pero se conserva el vínculo por si se restauran
