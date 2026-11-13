@@ -6,7 +6,7 @@
  * sincronizarlo más adelante con la versión de PC.
  */
 
-const APP_VERSION = '0.3.3';
+const APP_VERSION = '0.3.4';
 const PREVIEW = document.documentElement.dataset.preview === '1'; // copia de prueba publicada en Claude
 const DB_NAME = 'farmalab-movil';
 const EXPORT_FORMAT = 'farmalab-datos';
@@ -71,6 +71,7 @@ const ACTION_LABELS = {
   etiqueta_generada: 'Etiqueta generada',
   ficha_generada: 'Ficha de registro generada',
   ficha_mp_generada: 'Ficha de control de materia prima generada',
+  ficha_env_generada: 'Registro de acondicionamiento generado',
   control_calidad_materia_prima: 'Control de calidad de materia prima',
   valoracion_precio: 'Precio de valoración guardado',
   ajustes: 'Ajustes modificados',
@@ -90,6 +91,7 @@ const SECTIONS = {
   etiqueta: { title: 'Etiqueta', tab: 3 },
   ficha: { title: 'Ficha de registro', tab: 3 },
   fichamp: { title: 'Ficha de control', tab: 1 },
+  fichaenv: { title: 'Registro de envase', tab: 1 },
   pnt: { title: 'PNT', tab: 4 },
   biblio: { title: 'Bibliografía', tab: 4 },
   documento: { title: 'Documento', tab: 4 },

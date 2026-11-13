@@ -1,10 +1,12 @@
 'use strict';
-/* FARMA·LAB móvil · Fichas del RD 175/2001 en PDF A4:
-   ficha 1, control de calidad de materias primas (apartado 3.2.3), y
+/* FARMA·LAB móvil · Registros del RD 175/2001 en PDF A4:
+   ficha 1, control de calidad de materias primas (apartado 3.2.3);
+   registro de material de acondicionamiento (apartado 3.3 y PN/L/PG/006, anexo II), y
    ficha 2, registro de formulación magistral (apartado 3.4.2). */
 
 ROUTES.ficha = (arg) => viewRecordSheet(arg);
 ROUTES.fichamp = (arg) => viewMaterialSheet(arg);
+ROUTES.fichaenv = (arg) => viewPackagingSheet(arg);
 
 async function viewRecordSheet(id) {
   const p = await getOne('production', id);
@@ -479,6 +481,91 @@ async function buildMaterialSheetPdf(m, s, bulletins, draftMissing) {
   return sh.finish();
 }
 
+// ------------------------------------------------------------------ registro de material de acondicionamiento
+/** Datos del registro (apartado 3.3) que faltan en un material de acondicionamiento. */
+function packagingSheetMissing(p) {
+  const miss = [];
+  if (!p.internal_no) miss.push('nº de registro interno');
+  if (!str(p.supplier)) miss.push('proveedor');
+  if ((p.kind || 'primario') === 'primario' && !str(p.lot)) miss.push('nº de lote (acondicionamiento primario)');
+  if (!isDay(p.received_date)) miss.push('fecha de recepción');
+  if (!inspectionDone(p.inspection)) miss.push('inspección en la recepción');
+  if (!['aceptado', 'rechazado'].includes(p.status) || !isDay(p.decision_date)) miss.push('decisión de aceptación o rechazo');
+  return miss;
+}
+
+async function viewPackagingSheet(id) {
+  const p = await getOne('packaging', id);
+  if (!p) return empty('Este material no existe.', '');
+  state.parent = `#envases--${p.uuid}`;
+  state.label = null;
+  const missing = packagingSheetMissing(p);
+  return `<div class="panel">
+      <div class="head-row"><h2 class="big">${esc(p.name)}</h2>${pill('packaging', p.status)}</div>
+      <p>${p.internal_no ? `${esc(p.internal_no)} · ` : ''}${esc(PACK_KINDS[p.kind] || 'Primario')}${p.lot ? ` · Lote ${esc(p.lot)}` : ''}${p.supplier ? ` · ${esc(p.supplier)}` : ''}</p>
+    </div>
+    ${missing.length
+      ? `<div class="msg warn"><strong>Faltan datos:</strong> ${esc(missing.join(', '))}. Se puede generar como borrador; para el registro definitivo, complétalos en <a href="#envases--${esc(p.uuid)}--editar">Editar ficha</a>.</div>`
+      : '<p class="msg ok">El registro del material está completo.</p>'}
+    <form class="form" data-form="packagingSheet" data-id="${esc(p.uuid)}" novalidate>
+      ${formMsg()}
+      <button class="btn block" type="submit">${missing.length ? 'Generar borrador del registro' : 'Generar registro'}</button>
+    </form>
+    <div id="sheetOut"></div>`;
+}
+
+/** Registro de material de acondicionamiento: identificación, recepción e inspección, uso, observaciones y decisión. */
+async function buildPackagingSheetPdf(p, s, used, docs, draftMissing) {
+  const sh = await createSheet({
+    title: 'Registro de material de acondicionamiento', subtitle: 'Recepción, inspección y decisión de aceptación', tag: 'RD 175/2001 · Apartado 3.3',
+    running: `Registro de material de acondicionamiento · ${p.name}${p.lot ? ` · lote ${p.lot}` : ''}`,
+    footer: `FARMA·LAB · ${p.internal_no || p.name}`, pharmacy: s.pharmacy, draftMissing,
+  });
+  const { mm, C } = sh;
+  const primary = (p.kind || 'primario') === 'primario';
+  const qty = isNum(p.quantity_received) ? p.quantity_received : p.quantity;
+  sh.grid([
+    { label: 'Número de registro interno', value: p.internal_no || '—', big: true, span: 2 },
+    { label: 'Estado', value: STATUS.packaging[p.status] || p.status },
+    { label: 'Identificación del producto', value: `${p.name}${p.capacity ? `, ${p.capacity}` : ''}`, strong: true, span: 2 },
+    { label: 'Acondicionamiento', value: PACK_KINDS[p.kind] || 'Primario' },
+    { label: 'Proveedor', value: p.supplier || '—' },
+    { label: 'Lote', value: p.lot || (primary ? '—' : 'No procede') },
+    { label: 'Fecha de recepción', value: fmtDay(p.received_date) },
+    { label: 'Cantidad', value: isNum(qty) ? `${fmtNum(qty)} unidades` : '—' },
+    { label: 'Nº de envases', value: p.containers ? `${p.containers} ${p.containers === 1 ? 'caja o paquete' : 'cajas o paquetes'}` : '—' },
+    { label: 'Fecha de caducidad', value: isDay(p.expiry) ? fmtDay(p.expiry) : 'No procede' },
+    { label: 'Condiciones de conservación', value: p.storage || 'No procede', span: 3 },
+  ], 3, { bg: C.band, pad: mm(4) });
+
+  const insp = p.inspection || {};
+  sh.section('Inspección en la recepción', mm(22));
+  sh.table([{ title: 'Comprobación', w: 0.78 }, { title: 'Resultado', w: 0.22 }],
+    Object.entries(PACK_CHECKS).map(([k, label]) => [label, insp[k] ? 'Correcto' : 'Sin comprobar']));
+  sh.gap(mm(2));
+  sh.grid([
+    { label: 'Realizada por', value: insp.by || '—' },
+    { label: 'Fecha', value: isDay(insp.date) ? fmtDay(insp.date) : '—' },
+    { label: 'Documentación archivada', value: docs.length ? docs.join(', ') : '—' },
+  ], 3);
+
+  if (used.length) {
+    sh.section('Utilizado en', mm(20));
+    sh.table([{ title: 'Lote de la fórmula', w: 0.26 }, { title: 'Fórmula', w: 0.46 }, { title: 'Elaboración', w: 0.14 }, { title: 'Unidades', w: 0.14, right: true }], used);
+  }
+
+  sh.section('Observaciones');
+  sh.paragraph(p.observations || '—', { color: p.observations ? C.ink : C.muted });
+
+  const decided = ['aceptado', 'rechazado'].includes(p.status) && isDay(p.decision_date);
+  sh.signature({
+    decision: decided ? `Decisión final: ${STATUS.packaging[p.status].toLocaleLowerCase('es')} el ${fmtDay(p.decision_date)} por ${p.decision_by || '—'}` : 'En cuarentena: pendiente de decisión',
+    rejected: p.status === 'rechazado',
+    signer: [p.decision_by || s.pharmacy.pharmacist, decided && `Fecha: ${fmtDay(p.decision_date)}`].filter(Boolean).join(' · '),
+  });
+  return sh.finish();
+}
+
 /** Muestra el PDF generado con los botones de descarga y la vista previa. */
 async function showSheet(blob, name, heading) {
   state.label = { blob, name };
@@ -493,6 +580,22 @@ async function showSheet(blob, name, heading) {
 }
 
 Object.assign(FORMS, {
+  async packagingSheet(form) {
+    const p = await getOne('packaging', form.dataset.id);
+    if (!p) throw new InputError('Este material ya no existe.');
+    const s = await loadSettings();
+    const missing = packagingSheetMissing(p);
+    const used = (await getAll('production'))
+      .flatMap((x) => (x.packaging_used || []).filter((u) => u.packaging_uuid === p.uuid).map((u) => [x.lot || x.record_code, x.formula_name, fmtDay(x.elaborated_date), fmtNum(u.qty), x.elaborated_date || '']))
+      .sort((a, b) => String(a[4]).localeCompare(String(b[4])))
+      .map((r) => r.slice(0, 4));
+    const docs = (await docsOf(p.uuid)).map((f) => f.name);
+    const blob = await buildPackagingSheetPdf(p, s, used, docs, missing);
+    const slug = String(p.internal_no || p.lot || p.name).replace(/[^A-Za-z0-9._-]+/g, '-').slice(0, 60);
+    await logOnly('ficha_env_generada', `${p.name}${p.lot ? ` / ${p.lot}` : ''}${missing.length ? ' (borrador)' : ''}`);
+    await showSheet(blob, `registro-acondicionamiento-${slug}.pdf`, missing.length ? 'Borrador listo' : 'Registro listo');
+  },
+
   async materialSheet(form) {
     const m = await getOne('material', form.dataset.id);
     if (!m) throw new InputError('Este lote ya no existe.');

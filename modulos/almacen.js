@@ -4,6 +4,13 @@
 const STORE_TABS = [['#materias', 'Materias primas'], ['#envases', 'Acondicionamiento']];
 const KIND_LABELS = { activo: 'Principio activo', excipiente: 'Excipiente' };
 const PACK_KINDS = { primario: 'Primario', secundario: 'Secundario' };
+/** Inspección en la recepción del material de acondicionamiento (PN/L/PG/006, apartado 4.1). */
+const PACK_CHECKS = {
+  albaran: 'El albarán de entrega coincide con el material pedido',
+  material: 'El material recibido se corresponde con el albarán',
+  estado: 'El estado de envases, embalajes y etiquetado es correcto',
+};
+const inspectionDone = (insp) => Boolean(insp && Object.keys(PACK_CHECKS).every((k) => insp[k]));
 const AEMPS_ALERTS_URL = 'https://www.aemps.gob.es/comunicacion/alertas/alertas-farmaceuticas-y-retiradas-de-lotes-de-medicamentos-de-uso-humano-por-defectos-de-calidad/';
 
 ROUTES.materias = (arg, extra) => (arg === 'nueva' ? viewMaterialForm() : arg && extra === 'editar' ? viewMaterialForm(arg) : arg ? viewMaterial(arg) : viewMaterials());
@@ -327,12 +334,14 @@ async function viewPackaging(id) {
       ['Stock actual', `<span class="${stockClass(p)}">${fmtNum(p.quantity)} unidades</span>${isNum(p.min_stock) ? ` (mínimo ${fmtNum(p.min_stock)})` : ''}`],
       ['Caducidad', fmtDay(p.expiry)],
       ['Conservación', val(p.storage)],
+      ['Inspección', inspectionDone(p.inspection) ? `Correcta${p.inspection.by ? `, por ${esc(p.inspection.by)}` : ''}${isDay(p.inspection.date) ? ` el ${fmtDay(p.inspection.date)}` : ''}` : '<span class="warn">Sin completar</span>'],
       ['Decisión', p.decision_date ? `${esc(STATUS.packaging[p.status])} el ${fmtDay(p.decision_date)} por ${esc(p.decision_by)}` : '<span class="warn">Pendiente</span>'],
     ])}
     ${p.observations ? `<p class="pre spaced">${esc(p.observations)}</p>` : ''}
     <div class="actions spaced"><a class="btn secondary small" href="#envases--${esc(p.uuid)}--editar">Editar ficha</a></div>
   </div>
-  <section><h2>Decisión de aceptación o rechazo</h2>${statusButtons('packaging', p)}</section>
+  <section><h2>Decisión de aceptación o rechazo</h2>${statusButtons('packaging', p)}
+    <p><a class="btn block secondary" href="#fichaenv--${esc(p.uuid)}">${ICON.doc}Registro de acondicionamiento en PDF (RD 175/2001)</a></p></section>
   <section><h2>Regularizar stock</h2>${stockAdjustForm('packaging', p)}<p class="hint">El stock baja solo cuando una elaboración que usa este envase se marca como elaborada.</p></section>
   ${await docsSection('packaging', p.uuid, ['especificaciones', 'otro'])}
   ${used.length ? `<section><h2>Usado en</h2><ul class="list">${used.map((x) => `<li><a class="row" href="#elaboraciones--${esc(x.uuid)}"><div class="row-main"><strong>${esc(x.lot || x.record_code)}</strong><span class="sub"><span>${esc(x.formula_name)}</span></span></div>${pill('production', x.status)}</a></li>`).join('')}</ul></section>` : ''}`;
@@ -366,6 +375,14 @@ async function viewPackagingForm(id) {
       ${field('Caducidad', dateInput('expiry', v.expiry), 'Si procede.')}
     </div>
     ${field('Condiciones de conservación', text('storage', `value="${esc(v.storage || '')}" maxlength="200"`), 'Si procede.')}
+    <fieldset class="group"><legend>Inspección en la recepción</legend>
+      ${Object.entries(PACK_CHECKS).map(([k, label]) => checkbox(`insp_${k}`, esc(label), Boolean(v.inspection && v.inspection[k]))).join('')}
+      <div class="grid2">
+        ${field('Realizada por', text('insp_by', `value="${esc((v.inspection && v.inspection.by) ?? state.profile.name ?? '')}" maxlength="120"`))}
+        ${field('Fecha', dateInput('insp_date', (v.inspection && v.inspection.date) || v.received_date || todayIso()))}
+      </div>
+      <p class="hint">Si algo no es correcto, no lo aceptes: devuélvelo al proveedor.</p>
+    </fieldset>
     ${field('Observaciones', `<textarea name="observations" maxlength="2000">${esc(v.observations || '')}</textarea>`, 'Revisión anual, eliminación de material caducado u obsoleto...')}
     ${p ? '' : field('Estado', `<select name="status">${options(Object.keys(STATUS.packaging), 'aceptado', STATUS.packaging)}</select>`)}
     <button class="btn block" type="submit">${p ? 'Guardar cambios' : 'Registrar envase'}</button>
@@ -391,7 +408,14 @@ Object.assign(FORMS, {
       supplier: str(d.supplier).slice(0, 160), lot: str(d.lot).slice(0, 100), received_date: isDay(d.received_date) ? d.received_date : null,
       quantity, containers: intOrNull(d.containers, 'Nº de cajas'), min_stock: intOrNull(d.min_stock, 'Stock mínimo'),
       expiry: isDay(d.expiry) ? d.expiry : null, storage: str(d.storage).slice(0, 200), observations: str(d.observations).slice(0, 2000),
+      inspection: {
+        ...Object.fromEntries(Object.keys(PACK_CHECKS).map((k) => [k, d[`insp_${k}`] === 'on'])),
+        by: str(d.insp_by).slice(0, 120), date: isDay(d.insp_date) ? d.insp_date : null,
+      },
     };
+    if (!prev && rec.status === 'aceptado' && !inspectionDone(rec.inspection)) {
+      throw new InputError('Para registrarlo como aceptado, marca las tres comprobaciones de la inspección en la recepción, o regístralo en cuarentena.');
+    }
     await save('packaging', rec, prev ? 'edicion_acondicionamiento' : 'alta_acondicionamiento', `${rec.name}${rec.lot ? ` / ${rec.lot}` : ''}`);
     toast(prev ? 'Ficha guardada.' : 'Envase registrado.');
     location.hash = `#envases--${rec.uuid}`;
@@ -400,6 +424,9 @@ Object.assign(FORMS, {
 
 STATUS_CHECKS.packaging = async (p, status) => {
   if (status === 'rechazado') return { title: 'Rechazar material', message: `Se registrará el rechazo de ${p.name} con fecha de hoy y a tu nombre. Debe devolverse al proveedor.`, confirmLabel: 'Rechazar', danger: true };
-  if (status === 'aceptado' && !p.internal_no) return { title: 'Aceptar material', message: 'Falta el nº de registro interno. ¿Aceptarlo igualmente?', confirmLabel: 'Aceptar igualmente' };
-  return null;
+  if (status !== 'aceptado') return null;
+  const missing = [];
+  if (!p.internal_no) missing.push('el nº de registro interno');
+  if (!inspectionDone(p.inspection)) missing.push('la inspección en la recepción (en «Editar ficha»)');
+  return missing.length ? { title: 'Aceptar material', message: `Falta ${missing.join(' y ')}. ¿Aceptarlo igualmente?`, confirmLabel: 'Aceptar igualmente' } : null;
 };
