@@ -1,4 +1,4 @@
-# FARMA·LAB móvil v0.3.5 (prototipo)
+# FARMA·LAB móvil v0.3.6 (prototipo)
 
 App para Android que se instala desde Chrome y funciona sin conexión. Todos los datos se guardan **en el propio teléfono**.
 
@@ -13,6 +13,9 @@ App para Android que se instala desde Chrome y funciona sin conexión. Todos los
 - **Precio de las fórmulas financiadas** (Comunidad de Madrid), ver abajo.
 - **Documentos**: PNT y bibliografía con su PDF o Word, que se consultan dentro de la app, también sin conexión.
 - Registro de actividad, bloqueo con PIN, exportar e importar copias.
+
+## Novedades de la v0.3.6
+- Arreglo: en las listas con buscador (fórmulas, almacén, PNT, precio tasado...), la barra de búsqueda tapaba el primer elemento. Ahora queda fija bajo la cabecera y la lista empieza debajo.
 
 ## Novedades de la v0.3.5
 - **Editar PNT**: código, título, versión, categoría, fechas y ubicación del original («Editar PNT» en su ficha). El documento y el estado se siguen cambiando desde la ficha.

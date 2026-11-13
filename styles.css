@@ -355,7 +355,7 @@ input, select, textarea { min-width: 0; max-width: 100%; }
 .packrow { grid-template-columns: minmax(0, 1fr) 76px 44px; }
 .qcrow { grid-template-columns: minmax(0, 1fr) 44px; }
 .form, .panel, .weigh, fieldset { min-width: 0; }
-main { overflow-x: hidden; }
+main { overflow-x: clip; }   /* clip, no hidden: hidden convierte main en contenedor de scroll y descoloca la búsqueda fija */
 
 /* Valoración de fórmulas (precio de facturación) */
 .actrow { display: grid; grid-template-columns: minmax(0, 1fr) 96px 44px; gap: 6px; align-items: center; padding-top: 10px; border-top: 1px solid var(--line); }
