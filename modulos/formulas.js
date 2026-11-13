@@ -9,20 +9,23 @@ const isEdo = (c) => Boolean(c.edo || edoMatch(c.ingredient));
 const compTags = (c) => `${c.role === 'activo' ? '<span class="doc-tag pa">PA</span>' : ''}${isEdo(c) ? '<span class="doc-tag edo">EDO</span>' : ''}`;
 
 async function viewFormulas() {
-  const items = (await getAll('formula')).sort(byText('name'));
+  const all = await getAll('formula');
+  const items = all.filter((f) => !f.deleted_at).sort(byText('name'));
+  const trashed = all.length - items.length;
   const list = items.length
     ? `<ul class="list" data-list>${items.map((f) => `<li data-text="${esc(lc([f.name, f.code, f.form, (f.national_codes || []).map((c) => c.cn).join(' ')].join(' ')))}"><a class="row" href="#formulas--${esc(f.uuid)}"><div class="row-main"><strong>${esc(f.name)}</strong><span class="sub">${f.code ? `<span>${esc(f.code)}</span>` : ''}<span>Versión ${esc(f.version)}</span>${f.form ? `<span>${esc(f.form)}</span>` : ''}<span>${(f.components || []).length} componentes</span>${(f.national_codes || []).length ? `<span class="doc-tag">${f.national_codes.length} CN</span>` : ''}</span></div>${pill('formula', f.status)}</a></li>`).join('')}</ul><p class="none" data-none hidden>Ninguna fórmula coincide con la búsqueda.</p>`
     : empty('Aún no hay fórmulas.', 'Crea la primera con «Nueva fórmula». Para elaborarla, márcala como Aprobada.');
-  return `${items.length ? searchBox('Buscar nombre, código, forma o CN') : ''}${list}${fab('#formulas--nueva', 'Nueva fórmula')}`;
+  return `${items.length ? searchBox('Buscar nombre, código, forma o CN') : ''}${list}${trashed ? `<p class="more"><a href="#papelera">Eliminadas (${trashed})</a></p>` : ''}${fab('#formulas--nueva', 'Nueva fórmula')}`;
 }
 
 async function viewFormula(id) {
   const f = await getOne('formula', id);
   if (!f) return empty('Esta fórmula no existe.', '');
-  const pnts = (await getAll('pnt')).filter((p) => (f.pnt_uuids || []).includes(p.uuid));
+  const pnts = (await getLive('pnt')).filter((p) => (f.pnt_uuids || []).includes(p.uuid));
   const cns = f.national_codes || [];
+  const gone = Boolean(f.deleted_at);
   const tasados = await Promise.all(cns.map((c) => tasadoFor(c.cn)));
-  return `<div class="panel">
+  return `${gone ? deletedBanner('formula', f) : ''}<div class="panel">
     <div class="head-row"><h2 class="big">${esc(f.name)}</h2>${pill('formula', f.status)}</div>
     ${facts([
       ['Tipo', esc(FORMULA_TYPES[f.type] || FORMULA_TYPES.fm)],
@@ -35,7 +38,7 @@ async function viewFormula(id) {
       ['Lote de referencia', `${fmtNum(f.target_amount)} ${esc(f.unit)}`],
       ['Referencia', val(f.reference)],
     ])}
-    <div class="actions spaced"><a class="btn secondary small" href="#formulas--${esc(f.uuid)}--editar">Editar fórmula</a><a class="btn secondary small" href="#valoracion--formula--${esc(f.uuid)}">Precio de valoración</a></div>
+    ${gone ? '' : `<div class="actions spaced"><a class="btn secondary small" href="#formulas--${esc(f.uuid)}--editar">Editar fórmula</a><a class="btn secondary small" href="#valoracion--formula--${esc(f.uuid)}">Precio de valoración</a></div>`}
   </div>
   <section><h2>Composición</h2><ul class="list">${(f.components || []).map((c) => `<li><div class="row"><span class="row-main">${esc(c.ingredient)} ${compTags(c)}</span><b class="num">${fmtNum(c.amount)} ${esc(c.unit)}</b></div></li>`).join('')}</ul></section>
   <section><h2>Códigos nacionales</h2>${cns.length
@@ -44,10 +47,25 @@ async function viewFormula(id) {
   <section><h2>PNT de elaboración</h2>${pnts.length
     ? `<ul class="list">${pnts.map((p) => `<li><a class="row" href="#pnt--${esc(p.uuid)}"><div class="row-main"><strong><span class="code">${esc(p.code)}</span> ${esc(p.title)}</strong><span class="sub"><span>Versión ${esc(p.version)}</span></span></div>${pill('pnt', p.status)}</a></li>`).join('')}</ul>`
     : '<p class="hint none-docs">Sin PNT vinculado. Vincúlalo desde «Editar fórmula».</p>'}</section>
-  ${f.status === 'aprobada' ? `<p><a class="btn block" href="#elaboraciones--nueva--${esc(f.uuid)}">Elaborar con esta fórmula</a></p>` : ''}
+  ${gone ? '' : `${f.status === 'aprobada' ? `<p><a class="btn block" href="#elaboraciones--nueva--${esc(f.uuid)}">Elaborar con esta fórmula</a></p>` : ''}
   <section><h2>Cambiar estado</h2>${statusButtons('formula', f)}
-  <p class="hint">Solo las fórmulas aprobadas aparecen al crear una elaboración.</p></section>`;
+  <p class="hint">Solo las fórmulas aprobadas aparecen al crear una elaboración.</p></section>
+  <section><h2>Eliminar</h2><button class="btn danger-outline block" data-act="deleteRecord" data-store="formula" data-id="${esc(f.uuid)}">Eliminar fórmula</button>
+  <p class="hint">Pasa a la papelera y se puede restaurar. Las elaboraciones ya hechas conservan sus datos.</p></section>`}`;
 }
+
+DELETE_CHECKS.formula = async (f) => {
+  const used = (await getAll('production')).filter((p) => p.formula_uuid === f.uuid);
+  const open = used.filter((p) => p.status === 'en_proceso');
+  if (open.length) {
+    return { block: `Hay ${open.length === 1 ? 'una elaboración en proceso' : `${open.length} elaboraciones en proceso`} con esta fórmula (${open.map((p) => p.record_code).join(', ')}). Termínala${open.length === 1 ? '' : 's'} o recházala${open.length === 1 ? '' : 's'} antes de eliminarla.` };
+  }
+  return {
+    message: used.length
+      ? `Se ha usado en ${used.length === 1 ? 'una elaboración' : `${used.length} elaboraciones`}: sus registros, etiquetas y fichas se conservan, pero no se podrá volver a elaborar mientras esté eliminada. Si solo quieres dejar de usarla, márcala como obsoleta.`
+      : '',
+  };
+};
 
 function componentRow(c = {}) {
   return `<div class="comp" data-comp>
@@ -69,10 +87,11 @@ function cnRow(c = {}) {
 async function viewFormulaForm(id) {
   const f = id ? await getOne('formula', id) : null;
   if (id && !f) return empty('Esta fórmula no existe.', '');
+  if (f && f.deleted_at) return `${deletedBanner('formula', f)}<p class="hint">Restáurala para poder editarla.</p>`;
   const v = f || { version: '1', target_amount: 100, unit: 'g', type: 'fm', status: 'borrador' };
   const mats = await getAll('material');
   const names = [...new Set(mats.map((m) => m.name))].sort((a, b) => a.localeCompare(b, 'es'));
-  const pnts = (await getAll('pnt')).sort(byText('code'));
+  const pnts = (await getLive('pnt')).sort(byText('code'));
   const comps = v.components && v.components.length ? v.components : [{}, {}];
   const cns = v.national_codes && v.national_codes.length ? v.national_codes : [{}];
   let tasado = [];
@@ -153,6 +172,8 @@ Object.assign(FORMS, {
     const d = formData(form);
     const all = new FormData(form);
     const prev = form.dataset.id ? await getOne('formula', form.dataset.id) : null;
+    if (prev && prev.deleted_at) throw new InputError('Esta fórmula está en la papelera. Restáurala para poder editarla.');
+    const trashedPnts = new Set((await getAll('pnt')).filter((x) => x.deleted_at).map((x) => x.uuid));
     const name = str(d.name);
     if (!name) throw new InputError('Escribe el nombre de la fórmula.');
     const target = parseNum(d.target_amount, 'Lote de referencia');
@@ -187,7 +208,8 @@ Object.assign(FORMS, {
       type: FORMULA_TYPES[d.type] ? d.type : 'fm', form: str(d.form).slice(0, 80), route: str(d.route).slice(0, 80),
       storage: str(d.storage).slice(0, 160), validity_days: validity, reference: str(d.reference).slice(0, 200),
       target_amount: target, unit: FORMULA_UNITS.includes(d.unit) ? d.unit : 'g', components, national_codes,
-      pnt_uuids: all.getAll('pnt_uuids').filter((x) => ID_RE.test(x)),
+      // los PNT en la papelera no salen en la lista, pero se conserva el vínculo por si se restauran
+      pnt_uuids: [...new Set([...all.getAll('pnt_uuids').filter((x) => ID_RE.test(x)), ...(prev ? (prev.pnt_uuids || []).filter((u) => trashedPnts.has(u)) : [])])],
     };
     await save('formula', rec, prev ? 'edicion_formula' : 'alta_formula', `${rec.code} ${rec.name} v${rec.version}`.trim());
     toast(prev ? 'Fórmula actualizada.' : 'Fórmula guardada.');

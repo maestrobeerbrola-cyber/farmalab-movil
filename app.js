@@ -6,7 +6,7 @@
  * sincronizarlo más adelante con la versión de PC.
  */
 
-const APP_VERSION = '0.3.4';
+const APP_VERSION = '0.3.5';
 const PREVIEW = document.documentElement.dataset.preview === '1'; // copia de prueba publicada en Claude
 const DB_NAME = 'farmalab-movil';
 const EXPORT_FORMAT = 'farmalab-datos';
@@ -69,6 +69,11 @@ const ACTION_LABELS = {
   asignar_lote: 'Lote asignado',
   consumo_stock: 'Consumo de stock',
   etiqueta_generada: 'Etiqueta generada',
+  eliminar_formula: 'Fórmula eliminada',
+  restaurar_formula: 'Fórmula restaurada',
+  eliminar_pnt: 'PNT eliminado',
+  restaurar_pnt: 'PNT restaurado',
+  edicion_pnt: 'Edición de PNT',
   ficha_generada: 'Ficha de registro generada',
   ficha_mp_generada: 'Ficha de control de materia prima generada',
   ficha_env_generada: 'Registro de acondicionamiento generado',
@@ -96,6 +101,7 @@ const SECTIONS = {
   biblio: { title: 'Bibliografía', tab: 4 },
   documento: { title: 'Documento', tab: 4 },
   calculadora: { title: 'Calculadora' },
+  papelera: { title: 'Papelera' },
   valoracion: { title: 'Valoración' },
   ajustes: { title: 'Ajustes' },
   auditoria: { title: 'Actividad' },
@@ -156,6 +162,8 @@ const INPUT_HOOKS = [];
 const CHANGE_HOOKS = [];
 const STATUS_CHECKS = {};   // comprobaciones antes de cambiar de estado: store -> async (registro, estado) => opciones de ask() o null
 const ROW_BUILDERS = {};    // filas repetibles de los formularios (data-act="addRow" data-kind="...")
+const DELETE_CHECKS = {};   // antes de eliminar: store -> async (registro) => { message, block } (block impide eliminar)
+const RESTORE_CHECKS = {};  // antes de restaurar: store -> async (registro) => mensaje de error o null
 
 // ------------------------------------------------------------------ utilidades
 class InputError extends Error {}
@@ -291,6 +299,13 @@ async function tx(stores, mode, work) {
   });
 }
 const getAll = (s) => tx(s, 'readonly', (t) => t.objectStore(s).getAll());
+/**
+ * Las fórmulas y los PNT eliminados no se borran: quedan en la papelera con deleted_at y se pueden restaurar.
+ * Al ser un cambio más del registro, viaja en las copias y se aplica en el otro equipo al importarlas.
+ */
+const getLive = async (s) => (await getAll(s)).filter((r) => !r.deleted_at);
+const DELETABLE = { formula: 'Fórmula', pnt: 'PNT' };
+const recordName = (store, r) => (store === 'pnt' ? `${r.code} ${r.title}` : `${r.name}${r.version ? ` (versión ${r.version})` : ''}`);
 const getOne = (s, id) => tx(s, 'readonly', (t) => t.objectStore(s).get(id));
 const metaGet = (k) => tx('meta', 'readonly', (t) => t.objectStore('meta').get(k));
 const metaSet = (k, v) => tx('meta', 'readwrite', (t) => t.objectStore('meta').put(v, k));
@@ -595,6 +610,24 @@ function renderShell() {
 ROUTES[''] = () => viewHome();
 ROUTES.ajustes = () => viewSettings();
 ROUTES.auditoria = () => viewAudit();
+ROUTES.papelera = () => viewTrash();
+
+async function viewTrash() {
+  const rows = [];
+  for (const st of Object.keys(DELETABLE)) {
+    (await getAll(st)).filter((r) => r.deleted_at).forEach((r) => rows.push({ st, r }));
+  }
+  rows.sort((a, b) => String(b.r.deleted_at).localeCompare(String(a.r.deleted_at)));
+  const href = ({ st, r }) => (st === 'pnt' ? `#pnt--${r.uuid}` : `#formulas--${r.uuid}`);
+  return `<p class="hint intro">Las fórmulas y los PNT eliminados se guardan aquí. Al restaurarlos vuelven a su lista con sus documentos y vínculos.</p>
+    ${rows.length
+      ? `<ul class="list">${rows.map((x) => `<li><div class="row"><a class="row-main" href="${esc(href(x))}"><span class="kind">${esc(DELETABLE[x.st])}</span><strong>${esc(recordName(x.st, x.r))}</strong><span class="sub"><span>${x.st === 'formula' ? 'Eliminada' : 'Eliminado'} el ${esc(fmtStamp(x.r.deleted_at))}${x.r.deleted_by ? ` por ${esc(x.r.deleted_by)}` : ''}</span></span></a><button class="btn secondary small" data-act="restoreRecord" data-store="${x.st}" data-id="${esc(x.r.uuid)}">Restaurar</button></div></li>`).join('')}</ul>`
+      : empty('La papelera está vacía.', 'Aquí aparecerán las fórmulas y los PNT que elimines.')}`;
+}
+/** Aviso de elemento eliminado, con el botón para restaurarlo. */
+function deletedBanner(store, r) {
+  return `<div class="msg warn reminder"><p><strong>${esc(DELETABLE[store])} eliminad${store === 'formula' ? 'a' : 'o'}</strong> el ${esc(fmtStamp(r.deleted_at))}${r.deleted_by ? ` por ${esc(r.deleted_by)}` : ''}. Está en la papelera.</p><button class="btn small" data-act="restoreRecord" data-store="${store}" data-id="${esc(r.uuid)}">Restaurar</button></div>`;
+}
 
 /**
  * Las pantallas se preparan de una en una: si se navega mientras otra aún carga, la anterior
@@ -613,7 +646,7 @@ async function renderRoute() {
   if (parts[0] === 'inicio') parts[0] = '';
   const [sec = '', arg = '', extra = ''] = parts;
   const info = SECTIONS[sec] || SECTIONS[''];
-  state.parent = arg ? `#${sec}` : (sec === 'auditoria' ? '#ajustes' : '#inicio');
+  state.parent = arg ? `#${sec}` : (['auditoria', 'papelera'].includes(sec) ? '#ajustes' : '#inicio');
   let html;
   try {
     const handler = ROUTES[sec];
@@ -627,7 +660,7 @@ async function renderRoute() {
   state.objectUrls = [];
   $('#view').innerHTML = html;
   $('#title').textContent = info.title;
-  const sub = Boolean(arg) || ['ajustes', 'auditoria', 'calculadora', 'valoracion', 'etiqueta'].includes(sec);
+  const sub = Boolean(arg) || ['ajustes', 'auditoria', 'papelera', 'calculadora', 'valoracion', 'etiqueta'].includes(sec);
   $('#backBtn').hidden = !sub;
   $('#mark').hidden = sub;
   $$('.tabbar a').forEach((a, i) => {
@@ -691,7 +724,8 @@ async function updateAlertBadge() {
 }
 
 async function viewHome() {
-  const [mats, packs, forms, pnts, prods, bib, audit] = await Promise.all(['material', 'packaging', 'formula', 'pnt', 'production', 'biblio', 'audit'].map(getAll));
+  const [mats, packs, forms, pnts, prods, bib, audit] = await Promise.all(['material', 'packaging', 'formula', 'pnt', 'production', 'biblio', 'audit']
+    .map((st) => (DELETABLE[st] ? getLive(st) : getAll(st))));
   const backup = await backupStatus();
   const alerts = await computeAlerts();
   const open = prods.filter((p) => p.status === 'en_proceso').sort(byNewest);
@@ -811,7 +845,7 @@ async function viewSettings() {
       ${persisted === true ? '' : '<button class="btn secondary" data-act="persist">Proteger datos</button><p class="hint">Si Chrome no lo permite, instala primero la app en la pantalla de inicio y vuelve a intentarlo.</p>'}
       ${standalone ? '<p class="hint">App instalada en el teléfono.</p>' : state.deferredInstall ? '<button class="btn secondary" data-act="install">Instalar en el teléfono</button>' : '<p class="hint">Para instalarla: menú de Chrome (⋮) y «Instalar aplicación».</p>'}
     </div></section>
-  <section><h2>Actividad</h2><ul class="list"><li><a class="row" href="#auditoria"><span class="row-main">Ver el registro de actividad</span></a></li></ul></section>
+  <section><h2>Actividad</h2><ul class="list"><li><a class="row" href="#auditoria"><span class="row-main">Ver el registro de actividad</span></a></li><li><a class="row" href="#papelera"><span class="row-main">Papelera: fórmulas y PNT eliminados</span></a></li></ul></section>
   <section><h2>Acerca de</h2><div class="panel"><dl class="facts">
       <dt>Versión</dt><dd>FARMA·LAB móvil ${APP_VERSION}</dd>
       <dt>Usuario</dt><dd>${esc(state.profile.name)}</dd>
@@ -1038,6 +1072,39 @@ const ACTIONS = {
     }
     await save(store, rec, STATUS_ACTIONS[store], `${recordLabel(store, rec)}: ${STATUS[store][status]}`);
     toast(`Estado cambiado a ${STATUS[store][status]}.`);
+    await route();
+  },
+  deleteRecord: async (el) => {
+    const { store, id } = el.dataset;
+    if (!DELETABLE[store]) return;
+    const rec = await getOne(store, id);
+    if (!rec || rec.deleted_at) return;
+    const check = DELETE_CHECKS[store] ? await DELETE_CHECKS[store](rec) : { message: '' };
+    if (check.block) { await ask({ title: `No se puede eliminar`, message: check.block, confirmLabel: 'Entendido', cancelLabel: 'Cerrar' }); return; }
+    const name = recordName(store, rec);
+    const ok = await ask({
+      title: `Eliminar ${DELETABLE[store] === 'PNT' ? 'PNT' : 'fórmula'}`,
+      message: `${name} pasará a la papelera (Ajustes → Papelera), desde donde se puede restaurar.${check.message ? `\n\n${check.message}` : ''}`,
+      confirmLabel: 'Eliminar', danger: true,
+    });
+    if (!ok) return;
+    rec.deleted_at = nowIso();
+    rec.deleted_by = state.profile.name;
+    await save(store, rec, `eliminar_${store}`, name);
+    toast(`${DELETABLE[store]} eliminad${store === 'formula' ? 'a' : 'o'}. Puedes restaurarl${store === 'formula' ? 'a' : 'o'} desde la papelera.`);
+    location.hash = store === 'pnt' ? '#pnt' : '#formulas';
+  },
+  restoreRecord: async (el) => {
+    const { store, id } = el.dataset;
+    if (!DELETABLE[store]) return;
+    const rec = await getOne(store, id);
+    if (!rec || !rec.deleted_at) return;
+    const problem = RESTORE_CHECKS[store] ? await RESTORE_CHECKS[store](rec) : null;
+    if (problem) { await ask({ title: 'No se puede restaurar', message: problem, confirmLabel: 'Entendido', cancelLabel: 'Cerrar' }); return; }
+    delete rec.deleted_at;
+    delete rec.deleted_by;
+    await save(store, rec, `restaurar_${store}`, recordName(store, rec));
+    toast(`${DELETABLE[store]} restaurad${store === 'formula' ? 'a' : 'o'}.`);
     await route();
   },
   downloadDoc: async (el) => {

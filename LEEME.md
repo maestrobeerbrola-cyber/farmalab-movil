@@ -1,4 +1,4 @@
-# FARMA·LAB móvil v0.3.4 (prototipo)
+# FARMA·LAB móvil v0.3.5 (prototipo)
 
 App para Android que se instala desde Chrome y funciona sin conexión. Todos los datos se guardan **en el propio teléfono**.
 
@@ -13,6 +13,13 @@ App para Android que se instala desde Chrome y funciona sin conexión. Todos los
 - **Precio de las fórmulas financiadas** (Comunidad de Madrid), ver abajo.
 - **Documentos**: PNT y bibliografía con su PDF o Word, que se consultan dentro de la app, también sin conexión.
 - Registro de actividad, bloqueo con PIN, exportar e importar copias.
+
+## Novedades de la v0.3.5
+- **Editar PNT**: código, título, versión, categoría, fechas y ubicación del original («Editar PNT» en su ficha). El documento y el estado se siguen cambiando desde la ficha.
+- **Eliminar fórmulas y PNT**: botón «Eliminar» al final de su ficha. Pasan a la **papelera** (Ajustes → Papelera, o «Eliminadas» al final de cada lista), desde donde se pueden restaurar con sus documentos y vínculos.
+  - Una fórmula con una elaboración en proceso no se puede eliminar hasta terminarla o rechazarla. Las elaboraciones ya hechas conservan todos sus datos.
+  - Un PNT eliminado deja de aparecer en las fórmulas que lo usan; si se restaura, vuelve.
+  - La eliminación viaja en las copias: al importar la copia en otro equipo, también se elimina allí.
 
 ## Novedades de la v0.3.4
 - **Registro de material de acondicionamiento en PDF** (RD 175/2001, apartado 3.3, y anexo II del PN/L/PG/006). Desde la ficha del envase, «Registro de acondicionamiento en PDF»: nº de registro interno, identificación, proveedor, lote, fecha de recepción, cantidad y nº de envases, caducidad y conservación (o «No procede»), inspección en la recepción, fórmulas en las que se ha usado, observaciones, decisión final y firma.

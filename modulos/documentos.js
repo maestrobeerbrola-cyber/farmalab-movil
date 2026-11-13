@@ -239,12 +239,14 @@ function sanitizeDocHtml(html) {
 
 // ------------------------------------------------------------------ PNT
 const DOCS_TABS = [['#pnt', 'PNT'], ['#biblio', 'Bibliografía']];
-ROUTES.pnt = (arg) => (arg === 'nuevo' ? viewPntForm() : arg ? viewPnt(arg) : viewPnts());
+ROUTES.pnt = (arg, extra) => (arg === 'nuevo' ? viewPntForm() : arg && extra === 'editar' ? viewPntForm(arg) : arg ? viewPnt(arg) : viewPnts());
 ROUTES.documento = (arg) => viewDocument(arg);
 AFTER_RENDER.push(() => { const v = $('#docview'); if (v) renderDocument(v); });
 
 async function viewPnts() {
-  const items = (await getAll('pnt')).sort(byText('code'));
+  const all = await getAll('pnt');
+  const items = all.filter((p) => !p.deleted_at).sort(byText('code'));
+  const trashed = all.length - items.length;
   const latest = {};
   (await getAll(FILE_STORE)).filter((f) => (f.owner_type || 'pnt') === 'pnt').sort(latestFirst)
     .forEach((f) => { const k = f.owner_uuid || f.pnt_uuid; if (!latest[k]) latest[k] = f; });
@@ -255,7 +257,7 @@ async function viewPnts() {
       return `<li data-text="${esc(lc([p.code, p.title, p.category, p.file_note].join(' ')))}"><a class="row" href="#pnt--${esc(p.uuid)}"><div class="row-main"><strong><span class="code">${esc(p.code)}</span> ${esc(p.title)}</strong><span class="sub">${p.category ? `<span>${esc(p.category)}</span>` : ''}<span>Versión ${esc(p.version)}</span><span>Revisión ${fmtDay(p.review_date)}</span>${overdue ? '<span class="bad">Revisión vencida</span>' : ''}</span><span class="sub">${doc ? `<span class="doc-tag">${esc(DOC_TYPES[doc.ext].label)}</span>` : '<span>Sin documento</span>'}</span></div>${pill('pnt', p.status)}</a></li>`;
     }).join('')}</ul><p class="none" data-none hidden>Ningún PNT coincide con la búsqueda.</p>`
     : empty('Aún no hay PNT registrados.', 'Registra el primero con «Nuevo PNT».');
-  return `${segmented(DOCS_TABS, '#pnt')}${items.length ? searchBox('Buscar código, título o categoría') : ''}${list}${fab('#pnt--nuevo', 'Nuevo PNT')}`;
+  return `${segmented(DOCS_TABS, '#pnt')}${items.length ? searchBox('Buscar código, título o categoría') : ''}${list}${trashed ? `<p class="more"><a href="#papelera">Eliminados (${trashed})</a></p>` : ''}${fab('#pnt--nuevo', 'Nuevo PNT')}`;
 }
 
 async function viewPnt(id) {
@@ -266,8 +268,9 @@ async function viewPnt(id) {
   const overdue = p.status === 'vigente' && isDay(p.review_date) && daysUntil(p.review_date) < 0;
   const canShare = current && current.ext === 'pdf' && navigator.canShare
     && navigator.canShare({ files: [new File([''], 'x.pdf', { type: 'application/pdf' })] });
-  const linked = (await getAll('formula')).filter((f) => (f.pnt_uuids || []).includes(id));
-  return `<div class="panel">
+  const linked = (await getLive('formula')).filter((f) => (f.pnt_uuids || []).includes(id));
+  const gone = Boolean(p.deleted_at);
+  return `${gone ? deletedBanner('pnt', p) : ''}<div class="panel">
     <div class="head-row"><h2 class="big"><span class="code">${esc(p.code)}</span> ${esc(p.title)}</h2>${pill('pnt', p.status)}</div>
     ${facts([
       ['Versión', val(p.version)],
@@ -276,6 +279,7 @@ async function viewPnt(id) {
       ['Próxima revisión', `${fmtDay(p.review_date)}${overdue ? ' <span class="bad">vencida</span>' : ''}`],
       ['Ubicación', val(p.file_note)],
     ])}
+    ${gone ? '' : `<div class="actions spaced"><a class="btn secondary small" href="#pnt--${esc(p.uuid)}--editar">Editar PNT</a></div>`}
   </div>
   <section><h2>Documento</h2>
   ${current
@@ -288,7 +292,7 @@ async function viewPnt(id) {
     : empty('Este PNT aún no tiene documento.', 'Súbelo en PDF o Word para consultarlo desde aquí, también sin conexión.')}
   </section>
   ${linked.length ? `<section><h2>Fórmulas que lo usan</h2><ul class="list">${linked.map((f) => `<li><a class="row" href="#formulas--${esc(f.uuid)}"><span class="row-main">${esc(f.name)}</span>${pill('formula', f.status)}</a></li>`).join('')}</ul></section>` : ''}
-  <section><h2>${current ? 'Subir una versión nueva' : 'Subir documento'}</h2>
+  ${gone ? '' : `<section><h2>${current ? 'Subir una versión nueva' : 'Subir documento'}</h2>
   <form class="panel form" data-form="pntDoc" data-id="${esc(p.uuid)}" novalidate>
     ${formMsg()}
     ${filePicker('Elegir PDF o Word')}
@@ -300,27 +304,46 @@ async function viewPnt(id) {
     <button class="btn block" type="submit">Guardar documento</button>
     <p class="hint">Máximo 25 MB. Se guarda en este teléfono y entra en las copias de seguridad.${current ? ' El documento actual pasará a versiones anteriores; no se borra.' : ''}</p>
   </form></section>
-  ${older.length ? `<section><h2>Versiones anteriores</h2><ul class="list">${older.map((f) => docRow(f, false)).join('')}</ul></section>` : ''}
-  <section><h2>Cambiar estado</h2>${statusButtons('pnt', p)}</section>`;
+  `}${older.length ? `<section><h2>Versiones anteriores</h2><ul class="list">${older.map((f) => docRow(f, false)).join('')}</ul></section>` : ''}
+  ${gone ? '' : `<section><h2>Cambiar estado</h2>${statusButtons('pnt', p)}</section>
+  <section><h2>Eliminar</h2><button class="btn danger-outline block" data-act="deleteRecord" data-store="pnt" data-id="${esc(p.uuid)}">Eliminar PNT</button>
+  <p class="hint">Pasa a la papelera con sus documentos y se puede restaurar.</p></section>`}`;
 }
 
-function viewPntForm() {
-  return `<form class="form" data-form="pnt" novalidate>
+DELETE_CHECKS.pnt = async (p) => {
+  const linked = (await getLive('formula')).filter((f) => (f.pnt_uuids || []).includes(p.uuid));
+  return {
+    message: linked.length
+      ? `Está vinculado a ${linked.length === 1 ? 'la fórmula' : `${linked.length} fórmulas:`} ${linked.map((f) => f.name).join(', ')}. Dejará de aparecer en ${linked.length === 1 ? 'ella' : 'ellas'} y en las elaboraciones nuevas; si lo restauras, vuelve a aparecer. Las elaboraciones ya hechas conservan la referencia.`
+      : '',
+  };
+};
+RESTORE_CHECKS.pnt = async (p) => {
+  const clash = (await getLive('pnt')).find((x) => x.uuid !== p.uuid && lc(x.code) === lc(p.code));
+  return clash ? `Ya hay otro PNT con el código ${p.code} (${clash.title}). Cambia el código de ese PNT y vuelve a intentarlo.` : null;
+};
+
+async function viewPntForm(id) {
+  const p = id ? await getOne('pnt', id) : null;
+  if (id && !p) return empty('Este PNT no existe.', '');
+  if (p && p.deleted_at) return `${deletedBanner('pnt', p)}<p class="hint">Restáuralo para poder editarlo.</p>`;
+  const v = p || { version: '1' };
+  return `<form class="form" data-form="pnt" ${p ? `data-id="${esc(p.uuid)}"` : ''} novalidate>
     ${formMsg()}
     <div class="grid2">
-      ${field('Código', text('code', 'required maxlength="80"'))}
-      ${field('Versión', text('version', 'value="1" maxlength="30"'))}
+      ${field('Código', text('code', `required maxlength="80" value="${esc(v.code || '')}"`))}
+      ${field('Versión', text('version', `value="${esc(v.version || '1')}" maxlength="30"`))}
     </div>
-    ${field('Título', text('title', 'required maxlength="180"'))}
-    ${field('Categoría', text('category', 'maxlength="100"'))}
+    ${field('Título', text('title', `required maxlength="180" value="${esc(v.title || '')}"`))}
+    ${field('Categoría', text('category', `maxlength="100" value="${esc(v.category || '')}"`))}
     <div class="grid2">
-      ${field('Entrada en vigor', dateInput('effective_date'))}
-      ${field('Próxima revisión', dateInput('review_date'))}
+      ${field('Entrada en vigor', dateInput('effective_date', v.effective_date))}
+      ${field('Próxima revisión', dateInput('review_date', v.review_date))}
     </div>
-    <div class="field"><span>Documento (opcional)</span>${filePicker('Elegir PDF o Word')}</div>
-    ${field('Ubicación del original', text('file_note', 'maxlength="500"'), 'Dónde está el documento en papel: carpeta, archivador...')}
-    ${field('Estado', `<select name="status">${options(Object.keys(STATUS.pnt), 'borrador', STATUS.pnt)}</select>`)}
-    <button class="btn block" type="submit">Guardar PNT</button>
+    ${p ? '' : `<div class="field"><span>Documento (opcional)</span>${filePicker('Elegir PDF o Word')}</div>`}
+    ${field('Ubicación del original', text('file_note', `maxlength="500" value="${esc(v.file_note || '')}"`), 'Dónde está el documento en papel: carpeta, archivador...')}
+    ${p ? '<p class="hint">El documento y el estado se cambian desde la ficha del PNT.</p>' : field('Estado', `<select name="status">${options(Object.keys(STATUS.pnt), 'borrador', STATUS.pnt)}</select>`)}
+    <button class="btn block" type="submit">${p ? 'Guardar cambios' : 'Guardar PNT'}</button>
   </form>`;
 }
 
@@ -329,7 +352,21 @@ Object.assign(FORMS, {
     const d = formData(form);
     const code = str(d.code); const title = str(d.title);
     if (!code || !title) throw new InputError('El código y el título son obligatorios.');
-    if ((await getAll('pnt')).some((x) => lc(x.code) === lc(code))) throw new InputError('Ya existe un PNT con ese código.');
+    const prev = form.dataset.id ? await getOne('pnt', form.dataset.id) : null;
+    if (form.dataset.id && (!prev || prev.deleted_at)) throw new InputError('Este PNT ya no está disponible para editar.');
+    if ((await getLive('pnt')).some((x) => x.uuid !== (prev && prev.uuid) && lc(x.code) === lc(code))) throw new InputError('Ya existe un PNT con ese código.');
+    if (prev) {
+      const rec = {
+        ...prev, code: code.slice(0, 80), title: title.slice(0, 180), category: str(d.category).slice(0, 100),
+        version: str(d.version).slice(0, 30) || '1',
+        effective_date: isDay(d.effective_date) ? d.effective_date : null, review_date: isDay(d.review_date) ? d.review_date : null,
+        file_note: str(d.file_note).slice(0, 500),
+      };
+      await save('pnt', rec, 'edicion_pnt', `${rec.code} ${rec.title}`);
+      toast('PNT guardado.');
+      location.hash = `#pnt--${rec.uuid}`;
+      return;
+    }
     const rec = {
       uuid: newId(), code: code.slice(0, 80), title: title.slice(0, 180), category: str(d.category).slice(0, 100),
       version: str(d.version).slice(0, 30) || '1',
@@ -349,7 +386,7 @@ Object.assign(FORMS, {
 
   async pntDoc(form) {
     const p = await getOne('pnt', form.dataset.id);
-    if (!p) throw new InputError('Este PNT ya no existe.');
+    if (!p || p.deleted_at) throw new InputError('Este PNT ya no existe o está en la papelera.');
     const file = form.elements.file.files[0];
     if (!file) throw new InputError('Elige un archivo PDF o Word.');
     const version = str(form.elements.version.value).slice(0, 30) || p.version || '1';

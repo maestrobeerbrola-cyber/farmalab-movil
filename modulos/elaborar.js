@@ -66,7 +66,7 @@ async function suggestRecordCode() {
 const presentationAmount = (text) => { const m = String(text || '').match(/(\d+(?:[.,]\d+)?)/); return m ? Number(m[1].replace(',', '.')) : null; };
 
 async function viewProductionNew(preselect) {
-  const formulas = (await getAll('formula')).filter((f) => f.status === 'aprobada').sort(byText('name'));
+  const formulas = (await getLive('formula')).filter((f) => f.status === 'aprobada').sort(byText('name'));
   state.formulaCache = Object.fromEntries(formulas.map((f) => [f.uuid, f]));
   if (!formulas.length) {
     return `<div class="empty"><strong>No hay fórmulas aprobadas.</strong>Solo se puede elaborar a partir de una fórmula en estado Aprobada.<a class="btn secondary small" href="#formulas">Ir a Fórmulas</a></div>`;
@@ -383,12 +383,12 @@ Object.assign(FORMS, {
     const code = str(d.record_code);
     if (!code) throw new InputError('Escribe el código de registro.');
     const f = await getOne('formula', d.formula_uuid);
-    if (!f || f.status !== 'aprobada') throw new InputError('Elige una fórmula aprobada.');
+    if (!f || f.deleted_at || f.status !== 'aprobada') throw new InputError('Elige una fórmula aprobada.');
     const target = parseNum(d.target_amount, 'Cantidad a elaborar');
     if (!target || target <= 0) throw new InputError('La cantidad debe ser mayor que cero.');
     if (!(f.target_amount > 0)) throw new InputError('La fórmula no tiene un lote de referencia válido.');
     if ((await getAll('production')).some((p) => lc(p.record_code) === lc(code))) throw new InputError('Ya existe un registro de elaboración con ese código.');
-    const pnts = (await getAll('pnt')).filter((p) => (f.pnt_uuids || []).includes(p.uuid));
+    const pnts = (await getLive('pnt')).filter((p) => (f.pnt_uuids || []).includes(p.uuid));
     const factor = target / f.target_amount;
     const cn = d.cn !== undefined && d.cn !== '' ? (f.national_codes || [])[Number(d.cn)] || null : null;
     const now = nowIso();
