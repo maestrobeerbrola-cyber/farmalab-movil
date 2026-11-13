@@ -403,3 +403,14 @@ p.intro { margin: 0 4px 12px; }
 .withunit { display: flex; align-items: center; gap: 8px; }
 .withunit input { flex: 1; min-width: 0; }
 .withunit span { color: var(--muted); }
+/* Sincronización con Google Drive: botón de la nube con un punto de estado */
+.sync-btn { position: relative; }
+.sync-dot { position: absolute; top: 8px; right: 7px; width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--navy); display: none; }
+.sync-btn[data-state="ok"] .sync-dot { display: block; background: #3ccf92; }
+.sync-btn[data-state="pending"] .sync-dot { display: block; background: #f2b33d; }
+.sync-btn[data-state="error"] .sync-dot { display: block; background: #ff7b6e; }
+.sync-btn[data-state="busy"] svg { animation: sync-pulse 1.1s ease-in-out infinite; }
+@keyframes sync-pulse { 50% { opacity: .3; } }
+@media (prefers-reduced-motion: reduce) { .sync-btn[data-state="busy"] svg { animation: none; opacity: .55; } }
+ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 10px; }
+ol.steps code { overflow-wrap: anywhere; font-size: 14px; background: var(--gray-bg); padding: 1px 5px; border-radius: 4px; }

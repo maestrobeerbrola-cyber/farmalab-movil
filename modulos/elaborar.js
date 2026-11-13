@@ -459,6 +459,12 @@ Object.assign(FORMS, {
         await save('production', rec, 'actualizar_pesadas', rec.record_code);
         throw new InputError(`Faltan pesadas reales o lotes de: ${missing.map((w) => w.ingredient).join(', ')}. Lo que has escrito se ha guardado.`);
       }
+      if (!(await beforeLot())) {
+        await save('production', rec, 'actualizar_pesadas', rec.record_code);
+        toast('Guía guardada. Todavía no se ha asignado el lote.');
+        await route();
+        return;
+      }
       const [mats, packs, s] = [await getAll('material'), await getAll('packaging'), await loadSettings()];
       const bad = rec.weighings.map((w) => findMaterialLot(mats, w.ingredient, w.material_lot)).filter((m) => m && (m.status !== 'aceptado' || (isDay(m.expiry) && daysUntil(m.expiry) < 0)));
       const elaborated = rec.elaborated_date || todayIso();
@@ -541,6 +547,7 @@ Object.assign(ACTIONS, {
   assignLot: async (el) => {
     const rec = await getOne('production', el.dataset.id);
     if (!rec || rec.lot) return;
+    if (!(await beforeLot())) return;
     const s = await loadSettings();
     const elaborated = rec.elaborated_date || String(rec.submitted_at || rec.updated_at || nowIso()).slice(0, 10);
     const used = new Set((await getAll('production')).map((x) => x.lot).filter(Boolean));

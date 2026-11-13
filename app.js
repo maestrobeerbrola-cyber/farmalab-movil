@@ -6,7 +6,7 @@
  * sincronizarlo más adelante con la versión de PC.
  */
 
-const APP_VERSION = '0.3.10';
+const APP_VERSION = '0.3.11';
 const PREVIEW = document.documentElement.dataset.preview === '1'; // copia de prueba publicada en Claude
 const DB_NAME = 'farmalab-movil';
 const EXPORT_FORMAT = 'farmalab-datos';
@@ -117,6 +117,7 @@ const SECTIONS = {
   calculadora: { title: 'Calculadora' },
   papelera: { title: 'Papelera' },
   conservacion: { title: 'Conservación' },
+  sincronizacion: { title: 'Sincronización' },
   valoracion: { title: 'Valoración' },
   ajustes: { title: 'Ajustes' },
   auditoria: { title: 'Actividad' },
@@ -183,6 +184,10 @@ const DELETE_CHECKS = {};   // antes de eliminar: store -> async (registro) => {
 const ALERT_SOURCES = [];   // avisos adicionales de los módulos: async () => [{ tone, kind, title, text, href }]
 const AFTER_UNLOCK = [];    // tareas al desbloquear la app (p. ej. borrado por fin del plazo de conservación)
 const RESTORE_CHECKS = {};  // antes de restaurar: store -> async (registro) => mensaje de error o null
+const BOOT_HOOKS = [];      // al arrancar, antes de pedir el PIN (p. ej. recoger la vuelta del inicio de sesión de Google)
+const SETTINGS_SECTIONS = [];   // apartados de Ajustes que añaden los módulos: async () => html
+const BEFORE_LOT = [];      // antes de asignar un número de lote: async () => true para seguir, false para no asignarlo
+const AFTER_SAVE = [];      // tras guardar cambios (p. ej. enviarlos al otro equipo); no se esperan
 
 // ------------------------------------------------------------------ utilidades
 class InputError extends Error {}
@@ -354,17 +359,31 @@ async function saveMany(entries, action, detail, extraAudit = [], metaPuts = {})
     Object.entries(metaPuts).forEach(([k, v]) => t.objectStore('meta').put(v, k));
     t.objectStore('meta').put(stamp, 'lastChange');
   });
+  afterSave();
+}
+function afterSave() {
+  AFTER_SAVE.forEach((fn) => { try { fn(); } catch (err) { console.error(err); } });
 }
 async function save(store, record, action, detail) {
   await saveMany([[store, record]], action, detail);
   return record;
+}
+/** Comprobaciones de los módulos antes de dar un número de lote (p. ej. sincronizar con el otro equipo). */
+async function beforeLot() {
+  for (const fn of BEFORE_LOT) if (!(await fn())) return false;
+  return true;
 }
 const docsOf = (ownerUuid) => tx(FILE_STORE, 'readonly', (t) => t.objectStore(FILE_STORE).index('owner_uuid').getAll(ownerUuid));
 const logOnly = (action, detail) => tx('audit', 'readwrite', (t) => t.objectStore('audit').put(auditEntry(action, detail, nowIso())));
 
 /** Ajustes de la farmacia (datos para etiquetas, numeración de lotes, utillaje...). */
 async function loadSettings() {
-  const saved = (await metaGet('settings')) || {};
+  state.settings = normalizeSettings(await metaGet('settings'));
+  return state.settings;
+}
+/** Ajustes guardados completados con los valores por defecto y corregidos si traen valores no válidos. */
+function normalizeSettings(stored) {
+  const saved = stored && typeof stored === 'object' ? stored : {};
   const s = {
     ...DEFAULT_SETTINGS, ...saved,
     pharmacy: { ...DEFAULT_SETTINGS.pharmacy, ...(saved.pharmacy || {}) },
@@ -383,8 +402,27 @@ async function loadSettings() {
   s.retention.enabled = s.retention.enabled !== false;
   if (!(isNum(s.pricing.p_factor) && s.pricing.p_factor > 0)) s.pricing.p_factor = DEFAULT_SETTINGS.pricing.p_factor;
   if (!(isNum(s.pricing.iva) && s.pricing.iva >= 0)) s.pricing.iva = DEFAULT_SETTINGS.pricing.iva;
-  state.settings = s;
   return s;
+}
+/**
+ * Une los ajustes de este dispositivo con los recibidos (copia o sincronización): ganan los más recientes,
+ * pero el próximo número de lote es siempre el mayor de los dos, para no repetir lotes.
+ */
+function mergeSettings(local, incoming) {
+  if (!incoming || typeof incoming !== 'object') return local;
+  const takeIncoming = String(incoming.updated_at || '') > String(local.updated_at || '');
+  const merged = takeIncoming ? {
+    ...local, ...incoming,
+    pharmacy: { ...local.pharmacy, ...(incoming.pharmacy || {}) },
+    label: { ...local.label, ...(incoming.label || {}) },
+    pricing: { ...local.pricing, ...(incoming.pricing || {}) },
+    retention: { ...local.retention, ...(incoming.retention || {}), production: { ...local.retention.production, ...((incoming.retention && incoming.retention.production) || {}) } },
+  } : { ...local };
+  const nextLot = Math.max(Number(local.lot.next) || 1, Number(incoming.lot && incoming.lot.next) || 1);
+  merged.lot = { ...(takeIncoming ? { ...local.lot, ...(incoming.lot || {}) } : local.lot), next: nextLot };
+  for (const k of ['equipment', 'qc_tests', 'mp_qc_tests']) if (!Array.isArray(merged[k])) merged[k] = local[k];
+  if (!merged.pricing || !(isNum(merged.pricing.p_factor) && merged.pricing.p_factor > 0) || !(isNum(merged.pricing.iva) && merged.pricing.iva >= 0)) merged.pricing = local.pricing;
+  return normalizeSettings(merged);
 }
 async function saveSettings(s, detail) {
   s.updated_at = nowIso();
@@ -394,6 +432,7 @@ async function saveSettings(s, detail) {
     t.objectStore('audit').put(auditEntry('ajustes', detail, s.updated_at));
   });
   state.settings = s;
+  afterSave();
 }
 
 // ------------------------------------------------------------------ iconos
@@ -415,6 +454,7 @@ const ICON = {
   book: svg('<path d="M5 4.5A1.5 1.5 0 0 1 6.5 3H19v15H6.5A1.5 1.5 0 0 0 5 19.5z"/><path d="M5 19.5A1.5 1.5 0 0 0 6.5 21H19v-3"/>'),
   tag: svg('<path d="M3 12V4h8l9.5 9.5-8 8z"/><circle cx="7.5" cy="8.5" r="1.5"/>'),
   ext: svg('<path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>'),
+  sync: svg('<path d="M7 18.5H6.5a4 4 0 0 1-.6-7.96A5.5 5.5 0 0 1 16.6 9a3.75 3.75 0 0 1 .9 7.4"/><path d="M15 13.5l-3-3-3 3M12 10.5V20"/>'),
 };
 const TABS = [['#inicio', 'Inicio', ICON.home], ['#materias', 'Almacén', ICON.box], ['#formulas', 'Fórmulas', ICON.flask], ['#elaboraciones', 'Elaborar', ICON.scale], ['#pnt', 'Documentos', ICON.doc]];
 
@@ -575,6 +615,9 @@ async function boot() {
     }
     state.profile = await metaGet('profile');
     await loadSettings();
+    for (const hook of BOOT_HOOKS) {
+      try { await hook(); } catch (err) { console.error(err); }
+    }
   } catch (err) {
     app.innerHTML = `<div class="gate"><div class="gate-card">${gateBrand}<p>No se puede abrir la base de datos del teléfono: ${esc(err.message)}</p></div></div>`;
     return;
@@ -626,6 +669,7 @@ function renderShell() {
       <button class="icon-btn" data-act="back" id="backBtn" aria-label="Volver" hidden>${ICON.back}</button>
       <span class="mark" id="mark">${ICON.cross}</span>
       <h1 id="title">FARMA·LAB</h1>
+      <button class="icon-btn sync-btn" data-act="syncNow" id="syncBtn" aria-label="Sincronizar con Google Drive" hidden>${ICON.sync}<span class="sync-dot"></span></button>
       <a class="icon-btn" href="#calculadora" aria-label="Calculadora">${ICON.calc}</a>
       <a class="icon-btn" href="#ajustes" aria-label="Ajustes y copias de seguridad">${ICON.sliders}</a>
       <button class="icon-btn" data-act="lock" aria-label="Bloquear">${ICON.lock}</button>
@@ -678,7 +722,7 @@ async function renderRoute() {
   if (parts[0] === 'inicio') parts[0] = '';
   const [sec = '', arg = '', extra = ''] = parts;
   const info = SECTIONS[sec] || SECTIONS[''];
-  state.parent = arg ? `#${sec}` : (['auditoria', 'papelera', 'conservacion'].includes(sec) ? '#ajustes' : '#inicio');
+  state.parent = arg ? `#${sec}` : (['auditoria', 'papelera', 'conservacion', 'sincronizacion'].includes(sec) ? '#ajustes' : '#inicio');
   let html;
   try {
     const handler = ROUTES[sec];
@@ -692,7 +736,7 @@ async function renderRoute() {
   state.objectUrls = [];
   $('#view').innerHTML = html;
   $('#title').textContent = info.title;
-  const sub = Boolean(arg) || ['ajustes', 'auditoria', 'papelera', 'conservacion', 'calculadora', 'valoracion', 'etiqueta'].includes(sec);
+  const sub = Boolean(arg) || ['ajustes', 'auditoria', 'papelera', 'conservacion', 'sincronizacion', 'calculadora', 'valoracion', 'etiqueta'].includes(sec);
   $('#backBtn').hidden = !sub;
   $('#mark').hidden = sub;
   $$('.tabbar a').forEach((a, i) => {
@@ -707,10 +751,11 @@ async function renderRoute() {
 
 // ------------------------------------------------------------------ Inicio y avisos
 async function backupStatus() {
-  const [lastExport, lastChange] = await Promise.all([metaGet('lastExport'), metaGet('lastChange')]);
+  const [lastExport, lastChange, syncCfg, syncSt] = await Promise.all([metaGet('lastExport'), metaGet('lastChange'), metaGet('syncConfig'), metaGet('syncState')]);
   const pending = Boolean(lastChange) && (!lastExport || lastChange > lastExport);
   const old = !lastExport || Date.now() - Date.parse(lastExport) > BACKUP_REMINDER_DAYS * 864e5;
-  return { lastExport, lastChange, remind: pending && old };
+  const synced = Boolean(syncCfg && syncSt && syncSt.last_ok);   // también están en Google Drive
+  return { lastExport, lastChange, remind: pending && old, synced };
 }
 
 /** Avisos que la app calcula al abrirse: stock, caducidades, cuarentenas, elaboraciones paradas y fichas incompletas. */
@@ -769,7 +814,7 @@ async function viewHome() {
 
   let html = '';
   if (backup.remind) {
-    html += `<div class="msg warn reminder"><p><strong>Haz una copia de seguridad.</strong> Tus datos solo están en este teléfono${backup.lastExport ? `; la última copia es del ${esc(fmtStamp(backup.lastExport))}` : ' y aún no has hecho ninguna copia'}.</p><button class="btn small" data-act="export">Exportar copia</button></div>`;
+    html += `<div class="msg warn reminder"><p><strong>Haz una copia de seguridad.</strong> ${backup.synced ? 'Tus datos se sincronizan con Google Drive, pero una copia propia permite volver atrás si algo se borra por error en los dos equipos' : 'Tus datos solo están en este teléfono'}${backup.lastExport ? `; la última copia es del ${esc(fmtStamp(backup.lastExport))}` : ' y aún no has hecho ninguna copia'}.</p><button class="btn small" data-act="export">Exportar copia</button></div>`;
   }
   if (state.deferredInstall && !standalone) {
     html += '<div class="msg ok reminder"><p>Instala FARMA·LAB para abrirla desde la pantalla de inicio y usarla sin conexión.</p><button class="btn small" data-act="install">Instalar</button></div>';
@@ -824,7 +869,7 @@ async function viewSettings() {
   const standalone = matchMedia('(display-mode: standalone)').matches;
   const ph = s.pharmacy;
   return `<section><h2>Copia de seguridad</h2><div class="panel stack">
-      <p>Tus datos solo están en este teléfono. Si se pierde, se rompe o se borran los datos de Chrome, solo se podrán recuperar con una copia.</p>
+      <p>${backup.synced ? 'Tus datos están en este dispositivo y, sincronizados, en Google Drive. Una copia propia sigue siendo útil: permite volver atrás si algo se borra o se cambia por error en los dos equipos.' : 'Tus datos solo están en este teléfono. Si se pierde, se rompe o se borran los datos de Chrome, solo se podrán recuperar con una copia.'}</p>
       <p><strong>Última copia:</strong> ${backup.lastExport ? esc(fmtStamp(backup.lastExport)) : 'ninguna todavía'}${backup.remind ? ' <span class="bad">(hay cambios sin copiar)</span>' : ''}</p>
       <div class="actions">
         <button class="btn" data-act="export">Exportar copia</button>
@@ -835,6 +880,7 @@ async function viewSettings() {
       ${recetas ? `<p class="hint">Las recetas adjuntas a las elaboraciones (${recetas}) no van en la copia: contienen datos de pacientes y solo se guardan en este dispositivo.</p>` : ''}
       <p class="hint">La copia es un archivo .json que se guarda en Descargas. Guárdalo también fuera del teléfono (correo, Drive o el PC). Importar añade los registros que no tengas y actualiza los que sean más recientes; no borra nada.</p>
     </div></section>
+  ${(await Promise.all(SETTINGS_SECTIONS.map((fn) => fn().catch((err) => { console.error(err); return ''; })))).join('')}
   <form class="form" data-form="settings" novalidate>
     ${formMsg()}
     <section><h2>Farmacia (aparece en las etiquetas)</h2><div class="panel form">
@@ -927,6 +973,7 @@ async function buildExport() {
     formato: EXPORT_FORMAT, version_formato: EXPORT_FORMAT_VERSION,
     app: `FARMA·LAB móvil ${APP_VERSION}`, exportado: nowIso(),
     dispositivo: state.deviceId, usuario: state.profile.name, ajustes, datos,
+    borrados: cleanTombstones(await metaGet('tombstones')),
   };
 }
 function downloadBlob(blob, name) {
@@ -960,18 +1007,28 @@ async function exportBackup(share) {
 
 const ID_RE = /^(?=.{8,64}$)[A-Za-z0-9]+(-[A-Za-z0-9]+)*$/;
 const OWNER_TYPES = ['pnt', 'material', 'packaging', 'biblio'];   // dueños de documentos que viajan en las copias
+/** Datos de un documento recibido (copia o sincronización): true si se pueden usar. Las recetas nunca viajan. */
+function docMetaOk(r) {
+  if (!r || typeof r !== 'object' || !ID_RE.test(String(r.uuid))) return false;
+  if (!ID_RE.test(String(r.owner_uuid || r.pnt_uuid))) return false;
+  if (typeof r.updated_at !== 'string' || typeof r.name !== 'string' || !DOC_TYPES[r.ext]) return false;
+  if (isLocalOnly(r) || !OWNER_TYPES.includes(r.owner_type || 'pnt')) return false;
+  return /^[0-9a-f]{64}$/.test(String(r.sha256));
+}
 /** Documento adjunto de una copia: valida los datos y comprueba que el archivo llega íntegro (SHA-256). */
 async function importedDoc(r) {
-  if (!r || typeof r !== 'object' || !ID_RE.test(String(r.uuid))) return null;
-  const owner = r.owner_uuid || r.pnt_uuid;
-  if (!ID_RE.test(String(owner))) return null;
-  if (typeof r.updated_at !== 'string' || typeof r.name !== 'string' || !DOC_TYPES[r.ext] || typeof r.data !== 'string') return null;
-  if (isLocalOnly(r) || !OWNER_TYPES.includes(r.owner_type || 'pnt')) return null;   // las recetas no viajan entre dispositivos
-  if (!/^[0-9a-f]{64}$/.test(String(r.sha256)) || r.data.length > (MAX_DOC_BYTES * 4) / 3 + 8) return null;
+  if (!docMetaOk(r) || typeof r.data !== 'string' || r.data.length > (MAX_DOC_BYTES * 4) / 3 + 8) return null;
   let bytes;
   try { bytes = base64ToBytes(r.data); } catch { return null; }
-  if (toHex(await crypto.subtle.digest('SHA-256', bytes)) !== r.sha256) return null;
   const { data, ...meta } = r;
+  return docFromBytes(meta, bytes);
+}
+/** Documento listo para guardar a partir de sus datos y su contenido, si el contenido es el esperado (SHA-256). */
+async function docFromBytes(r, bytes) {
+  if (!docMetaOk(r) || !bytes || bytes.length > MAX_DOC_BYTES) return null;
+  if (toHex(await crypto.subtle.digest('SHA-256', bytes)) !== r.sha256) return null;
+  const { data, blob, ...meta } = r;
+  const owner = r.owner_uuid || r.pnt_uuid;
   return {
     ...meta, owner_uuid: owner, owner_type: OWNER_TYPES.includes(r.owner_type) ? r.owner_type : 'pnt',
     kind: DOC_KINDS[r.kind] ? r.kind : 'documento', name: meta.name.slice(0, 200), mime: DOC_TYPES[r.ext].mime,
@@ -1013,57 +1070,155 @@ async function importBackup(file) {
   if (Number(payload.version_formato) > EXPORT_FORMAT_VERSION) {
     throw new InputError('La copia se hizo con una versión más nueva de FARMA·LAB. Actualiza la app e inténtalo de nuevo.');
   }
-  const plan = {};
-  let added = 0; let updated = 0; let same = 0; let invalid = 0;
-  for (const s of STORES) {
-    const incoming = Array.isArray(payload.datos[s]) ? payload.datos[s] : [];
-    const existing = new Map((await getAll(s)).map((r) => [r.uuid, r]));
-    plan[s] = [];
-    for (const raw of incoming) {
-      if (!validRecord(s, raw)) { invalid += 1; continue; }
-      const r = normalizeImported(s, raw);
-      const cur = existing.get(r.uuid);
-      if (!cur) { plan[s].push(r); added += 1; } else if (r.updated_at > (cur.updated_at || '')) { plan[s].push(r); updated += 1; } else same += 1;
+  const { plan, counts } = await planMerge(payload.datos, payload.ajustes, payload.borrados, importedDoc);
+  const { added, updated, same, invalid, docs, removed } = counts;
+  const summary = `Copia de ${payload.usuario || 'origen desconocido'} del ${fmtStamp(payload.exportado)}.\n\nRegistros nuevos: ${added}\nMás recientes que los tuyos: ${updated}${docs ? ` (incluye ${docs} ${docs === 1 ? 'documento adjunto' : 'documentos adjuntos'})` : ''}\nIguales o más antiguos (se ignoran): ${same}${invalid ? `\nNo válidos o dañados (se ignoran): ${invalid}` : ''}${removed ? `\nBorrados en el otro equipo por fin del plazo de conservación: ${removed}` : ''}${plan.settings ? '\nTambién se actualizan los ajustes.' : ''}\n\n${removed ? 'No se borra nada más de lo que ya tienes.' : 'No se borra nada de lo que ya tienes.'}`;
+  if (!(await ask({ title: 'Importar copia', message: summary, confirmLabel: 'Importar' }))) return;
+  await applyMerge(plan);
+  await logOnly('importar_copia', `${file.name}: ${added} nuevos, ${updated} actualizados${removed ? `, ${removed} borrados` : ''}`);
+  toast(added + updated + removed ? `Importados: ${added} nuevos y ${updated} actualizados${removed ? `; ${removed} borrados` : ''}.` : 'La copia no tenía nada nuevo.');
+  await route();
+}
+
+// ------------------------------------------------------------------ unir datos de otro equipo (copias y sincronización)
+const TOMBSTONE_KEEP_DAYS = 3 * 365;
+/**
+ * Borrados definitivos (fin del plazo de conservación): se recuerdan para que el registro
+ * no vuelva desde otro equipo que aún lo tenga. Formato: { uuid: { store, at } }.
+ */
+function cleanTombstones(raw) {
+  const out = {};
+  const limit = new Date(Date.now() - TOMBSTONE_KEEP_DAYS * 864e5).toISOString();
+  if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
+    for (const [id, v] of Object.entries(raw)) {
+      if (ID_RE.test(id) && v && [...STORES, FILE_STORE].includes(v.store) && typeof v.at === 'string' && v.at > limit) out[id] = { store: v.store, at: v.at };
     }
   }
-  plan[FILE_STORE] = [];
-  let docs = 0;
+  return out;
+}
+/** Anota borrados definitivos dentro de una transacción abierta que incluya 'meta'. */
+function addTombstones(t, list, stamp) {
+  if (!list.length) return;
+  const meta = t.objectStore('meta');
+  const g = meta.get('tombstones');
+  g.onsuccess = () => {
+    const all = cleanTombstones(g.result);
+    list.forEach(({ store, uuid }) => { all[uuid] = { store, at: stamp }; });
+    meta.put(all, 'tombstones');
+  };
+}
+/**
+ * Compara los datos recibidos (copia de seguridad o Google Drive) con los de este dispositivo, sin escribir nada.
+ * Gana la versión más reciente de cada registro. Un borrado definitivo gana a las versiones anteriores a él,
+ * y una modificación posterior al borrado gana al borrado. Las recetas de este dispositivo no se tocan nunca.
+ * getDoc(datos del documento) devuelve el documento listo para guardar, o null si no se puede usar.
+ */
+async function planMerge(datos, ajustes, borrados, getDoc) {
+  const incoming = datos && typeof datos === 'object' ? datos : {};
+  const localTombs = cleanTombstones(await metaGet('tombstones'));
+  const inTombs = cleanTombstones(borrados);
+  const tombOf = (id) => localTombs[id] || inTombs[id];
+  const plan = { puts: {}, deletes: [], tombs: {}, untomb: [], settings: null };
+  const counts = { added: 0, updated: 0, same: 0, invalid: 0, docs: 0, removed: 0, records: 0 };
+  const winners = new Map();   // uuid -> updated_at de lo recibido que se acepta
+  const existing = {};
+  for (const s of STORES) {
+    existing[s] = new Map((await getAll(s)).map((r) => [r.uuid, r]));
+    plan.puts[s] = [];
+    for (const raw of Array.isArray(incoming[s]) ? incoming[s] : []) {
+      if (!validRecord(s, raw)) { counts.invalid += 1; continue; }
+      const r = normalizeImported(s, raw);
+      const tomb = tombOf(r.uuid);
+      if (tomb && tomb.at >= r.updated_at) { counts.same += 1; continue; }
+      const cur = existing[s].get(r.uuid);
+      if (cur && !(r.updated_at > (cur.updated_at || ''))) { counts.same += 1; continue; }
+      if (tomb) plan.untomb.push(r.uuid);
+      plan.puts[s].push(r);
+      winners.set(r.uuid, r.updated_at);
+      if (cur) counts.updated += 1; else counts.added += 1;
+      if (s !== 'audit') counts.records += 1;
+    }
+  }
+  plan.puts[FILE_STORE] = [];
   const existingDocs = new Map((await getAll(FILE_STORE)).map((r) => [r.uuid, r]));
-  for (const raw of Array.isArray(payload.datos[FILE_STORE]) ? payload.datos[FILE_STORE] : []) {
-    const cur = existingDocs.get(raw && raw.uuid);
-    if (cur && !(String(raw.updated_at) > (cur.updated_at || ''))) { same += 1; continue; }
-    const doc = await importedDoc(raw);
-    if (!doc) { invalid += 1; continue; }
-    plan[FILE_STORE].push(doc); docs += 1;
-    if (cur) updated += 1; else added += 1;
+  for (const raw of Array.isArray(incoming[FILE_STORE]) ? incoming[FILE_STORE] : []) {
+    const id = raw && raw.uuid;
+    const cur = existingDocs.get(id);
+    if (cur && (isLocalOnly(cur) || !(String(raw.updated_at) > (cur.updated_at || '')))) { counts.same += 1; continue; }
+    const tomb = tombOf(id) || tombOf(raw && (raw.owner_uuid || raw.pnt_uuid));
+    if (tomb && tomb.at >= String(raw.updated_at)) { counts.same += 1; continue; }
+    const doc = await getDoc(raw);
+    if (!doc) { counts.invalid += 1; continue; }
+    plan.puts[FILE_STORE].push(doc);
+    counts.docs += 1; counts.records += 1;
+    if (cur) counts.updated += 1; else counts.added += 1;
   }
-  const local = await loadSettings();
-  const incomingSettings = payload.ajustes && typeof payload.ajustes === 'object' ? payload.ajustes : null;
-  let newSettings = null;
-  if (incomingSettings) {
-    const takeIncoming = String(incomingSettings.updated_at || '') > String(local.updated_at || '');
-    const merged = takeIncoming ? { ...local, ...incomingSettings, pharmacy: { ...local.pharmacy, ...(incomingSettings.pharmacy || {}) }, label: { ...local.label, ...(incomingSettings.label || {}) }, pricing: { ...local.pricing, ...(incomingSettings.pricing || {}) }, retention: { ...local.retention, ...(incomingSettings.retention || {}), production: { ...local.retention.production, ...((incomingSettings.retention && incomingSettings.retention.production) || {}) } } } : { ...local };
-    const nextLot = Math.max(Number(local.lot.next) || 1, Number(incomingSettings.lot && incomingSettings.lot.next) || 1);
-    merged.lot = { ...(takeIncoming ? { ...local.lot, ...(incomingSettings.lot || {}) } : local.lot), next: nextLot };
-    if (!Array.isArray(merged.equipment)) merged.equipment = local.equipment;
-    if (!Array.isArray(merged.mp_qc_tests)) merged.mp_qc_tests = local.mp_qc_tests;
-    if (!merged.pricing || !(isNum(merged.pricing.p_factor) && merged.pricing.p_factor > 0) || !(isNum(merged.pricing.iva) && merged.pricing.iva >= 0)) merged.pricing = local.pricing;
-    if (!Array.isArray(merged.qc_tests)) merged.qc_tests = local.qc_tests;
-    if (JSON.stringify(merged) !== JSON.stringify(local)) newSettings = merged;
+  for (const [id, tomb] of Object.entries(inTombs)) {
+    if (localTombs[id] && localTombs[id].at >= tomb.at) continue;
+    if (winners.has(id) && winners.get(id) > tomb.at) continue;   // se modificó después de borrarse: gana el registro
+    const cur = tomb.store === FILE_STORE ? existingDocs.get(id) : existing[tomb.store] && existing[tomb.store].get(id);
+    if (cur && (isLocalOnly(cur) || (cur.updated_at || '') > tomb.at)) continue;
+    plan.tombs[id] = tomb;
+    if (cur) { plan.deletes.push({ store: tomb.store, uuid: id, at: tomb.at }); counts.removed += 1; counts.records += 1; }
   }
-  const summary = `Copia de ${payload.usuario || 'origen desconocido'} del ${fmtStamp(payload.exportado)}.\n\nRegistros nuevos: ${added}\nMás recientes que los tuyos: ${updated}${docs ? ` (incluye ${docs} ${docs === 1 ? 'documento adjunto' : 'documentos adjuntos'})` : ''}\nIguales o más antiguos (se ignoran): ${same}${invalid ? `\nNo válidos o dañados (se ignoran): ${invalid}` : ''}${newSettings ? '\nTambién se actualizan los ajustes.' : ''}\n\nNo se borra nada de lo que ya tienes.`;
-  if (!(await ask({ title: 'Importar copia', message: summary, confirmLabel: 'Importar' }))) return;
-  if (added + updated || newSettings) {
-    await tx([...STORES, FILE_STORE, 'meta'], 'readwrite', (t) => {
-      for (const s of [...STORES, FILE_STORE]) plan[s].forEach((r) => t.objectStore(s).put(r));
-      if (newSettings) t.objectStore('meta').put(newSettings, 'settings');
-      t.objectStore('meta').put(nowIso(), 'lastChange');
+  if (ajustes && typeof ajustes === 'object') {
+    const local = await loadSettings();
+    if (JSON.stringify(mergeSettings(local, ajustes)) !== JSON.stringify(local)) plan.settings = ajustes;
+  }
+  return { plan, counts };
+}
+/** Aplica lo planificado en una sola operación, comprobando de nuevo cada registro por si ha cambiado mientras tanto. */
+async function applyMerge(plan) {
+  const nothing = !Object.values(plan.puts).some((l) => l.length) && !plan.deletes.length && !plan.settings
+    && !Object.keys(plan.tombs).length && !plan.untomb.length;
+  if (nothing) return false;
+  await tx([...STORES, FILE_STORE, 'meta'], 'readwrite', (t) => {
+    for (const [s, list] of Object.entries(plan.puts)) {
+      const os = t.objectStore(s);
+      list.forEach((r) => {
+        const g = os.get(r.uuid);
+        g.onsuccess = () => {
+          const cur = g.result;
+          if (s === FILE_STORE && cur && isLocalOnly(cur)) return;
+          if (!cur || String(r.updated_at) > String(cur.updated_at || '')) os.put(r);
+        };
+      });
+    }
+    plan.deletes.forEach(({ store, uuid, at }) => {
+      const os = t.objectStore(store);
+      const g = os.get(uuid);
+      g.onsuccess = () => {
+        const cur = g.result;
+        if (!cur || isLocalOnly(cur) || String(cur.updated_at || '') > at) return;
+        os.delete(uuid);
+        if (store === FILE_STORE) return;
+        const files = t.objectStore(FILE_STORE);
+        const k = files.index('owner_uuid').getAllKeys(uuid);   // incluidas las recetas de esa elaboración
+        k.onsuccess = () => k.result.forEach((key) => files.delete(key));
+      };
     });
-    if (newSettings) state.settings = newSettings;
-  }
-  await logOnly('importar_copia', `${file.name}: ${added} nuevos, ${updated} actualizados`);
-  toast(added + updated ? `Importados: ${added} nuevos y ${updated} actualizados.` : 'La copia no tenía nada nuevo.');
-  await route();
+    const meta = t.objectStore('meta');
+    if (Object.keys(plan.tombs).length || plan.untomb.length) {
+      const g = meta.get('tombstones');
+      g.onsuccess = () => {
+        const all = cleanTombstones(g.result);
+        Object.assign(all, plan.tombs);
+        plan.untomb.forEach((id) => { delete all[id]; });
+        meta.put(all, 'tombstones');
+      };
+    }
+    if (plan.settings) {
+      const g = meta.get('settings');
+      g.onsuccess = () => {
+        const cur = normalizeSettings(g.result);
+        const merged = mergeSettings(cur, plan.settings);
+        if (JSON.stringify(merged) !== JSON.stringify(cur)) meta.put(merged, 'settings');
+      };
+    }
+    meta.put(nowIso(), 'lastChange');
+  });
+  await loadSettings();
+  return true;
 }
 
 async function wipeAll() {

@@ -135,6 +135,8 @@ async function runRetention({ force = false } = {}) {
     await tx([it.store, FILE_STORE, 'audit', 'meta'], 'readwrite', (t) => {
       t.objectStore(it.store).delete(it.rec.uuid);
       docs.forEach((d) => t.objectStore(FILE_STORE).delete(d.uuid));
+      // Se anota el borrado para que el registro no vuelva desde el otro equipo al sincronizar o importar una copia.
+      addTombstones(t, [{ store: it.store, uuid: it.rec.uuid }, ...docs.filter((d) => !isLocalOnly(d)).map((d) => ({ store: FILE_STORE, uuid: d.uuid }))], stamp);
       t.objectStore('audit').put(auditEntry('borrado_conservacion', `${RETENTION_STORES[it.store]}: ${base} (${it.rule.replace(/ · .*/, '')}; ${docs.length ? `${docs.length} ${docs.length === 1 ? 'documento' : 'documentos'}` : 'sin documentos'})`, stamp));
       t.objectStore('meta').put(stamp, 'lastChange');
     });

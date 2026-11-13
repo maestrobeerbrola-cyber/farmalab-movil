@@ -1,6 +1,6 @@
-# FARMA·LAB móvil v0.3.10 (prototipo)
+# FARMA·LAB móvil v0.3.11 (prototipo)
 
-App para Android que se instala desde Chrome y funciona sin conexión. Todos los datos se guardan **en el propio teléfono**.
+App que se instala desde Chrome o Edge (Android y Windows) y funciona sin conexión. Los datos se guardan **en el propio dispositivo** y, si se configura, se sincronizan entre el móvil y el PC a través de Google Drive.
 
 ## Qué incluye
 - **Almacén.** Materias primas con número de control interno, proveedor, lote, boletín de análisis y ficha de seguridad adjuntos, detección de excipientes de declaración obligatoria y cambio de estado (cuarentena, aceptado, rechazado, bloqueado). Material de acondicionamiento (envases) con su ficha y su stock.
@@ -13,6 +13,12 @@ App para Android que se instala desde Chrome y funciona sin conexión. Todos los
 - **Precio de las fórmulas financiadas** (Comunidad de Madrid), ver abajo.
 - **Documentos**: PNT y bibliografía con su PDF o Word, que se consultan dentro de la app, también sin conexión.
 - Registro de actividad, bloqueo con PIN, exportar e importar copias.
+
+## Novedades de la v0.3.11
+- **Sincronización del móvil y el PC con Google Drive** (Ajustes → Sincronización móvil y PC). Los datos van a la carpeta oculta de la app en el Drive de la cuenta configurada (permiso `drive.appdata`: la app no ve ni toca ningún otro archivo). Se juntan los cambios de los dos equipos: gana la versión más reciente de cada registro y no se borra nada, salvo lo borrado por fin del plazo de conservación. Las recetas y el PIN no se sincronizan.
+- Botón de la nube en la barra superior: sincroniza al momento y su punto indica el estado (verde, al día; ámbar, pendiente; rojo, error). Con la sesión de Google abierta (dura alrededor de una hora), los cambios se envían solos a los pocos segundos y los del otro equipo llegan cada 5 minutos.
+- Antes de asignar un número de lote se sincroniza, para no repetirlo. Si aun así se repite (por ejemplo, sin conexión), aparece un aviso y se puede dar un lote nuevo a una de las elaboraciones.
+- Los borrados por fin del plazo de conservación se recuerdan y viajan también en las copias de seguridad, para que el registro no vuelva desde el otro equipo.
 
 ## Novedades de la v0.3.10
 - Arreglo: en una elaboración ya elaborada o dispensada se puede completar o corregir el **material de acondicionamiento**. Al guardar la guía, se descuenta del stock lo que se añade y se repone lo que se quita (con confirmación y anotación en la actividad).
@@ -101,8 +107,14 @@ Los datos solo están en ese teléfono. Se pierden si el teléfono se pierde o s
 1. Antes, exporta una copia desde la app (Ajustes → Exportar copia).
 2. Abre la app con conexión. Cuando aparezca «Hay una versión nueva de FARMA·LAB», pulsa **Actualizar**. Si no aparece en unos minutos, ciérrala y ábrela otra vez. La versión instalada aparece en Ajustes → Acerca de. Tus datos se conservan y se adaptan solos al formato nuevo.
 
-## 6. Compartir con la versión de PC (más adelante)
-Cada registro lleva un identificador único, la fecha de su último cambio y el dispositivo donde se creó. El archivo de copia (`formato: farmalab-datos`, versión 3) está pensado para que la versión de PC pueda importarlo. La versión de PC aún no tiene almacén, valoración ni etiquetas; esa importación y la sincronización son los siguientes pasos.
+## 6. Usarla en el PC y sincronizar con el móvil
+En el PC se instala la misma app: abre la dirección de GitHub Pages con Chrome o Edge y usa «Instalar aplicación» en el menú (⋮ o …). Para que el móvil y el PC compartan los datos:
+
+1. **Una sola vez, en Google Cloud** (con la cuenta de Google de la sincronización): crea un proyecto en console.cloud.google.com; en «APIs y servicios» → «Biblioteca», habilita **Google Drive API**; en «Google Auth Platform», configura la pantalla de consentimiento como **Externo** y añade la cuenta como **usuario de prueba**; en «Clientes», crea un cliente **Aplicación web** con el origen de JavaScript `https://maestrobeerbrola-cyber.github.io` y el URI de redirección `https://maestrobeerbrola-cyber.github.io/farmalab-movil/`. Copia el **ID de cliente**.
+2. **En cada equipo**: Ajustes → Sincronización móvil y PC → escribe la cuenta de Google y el ID de cliente → «Guardar y conectar». Se abre la ventana de Google para confirmar la cuenta.
+3. Si la ventana de Google no vuelve sola a la app (pasa en algunos móviles), usa «Conectar en esta ventana».
+
+La cuenta y el ID de cliente se escriben en la app de cada equipo; no están en el código publicado. Solo se sincroniza si se entra con la cuenta configurada. Los datos de Drive se pueden borrar desde Google Drive → Configuración → Administrar aplicaciones.
 
 ## Fuentes de los datos de precios
 - Anexo 3 del Convenio entre la Comunidad de Madrid y el Colegio Oficial de Farmacéuticos de Madrid (2023-2027): Tablas I a IV y preparados oficinales.

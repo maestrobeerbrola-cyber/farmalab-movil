@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://accounts.google.com/gsi/client; style-src 'self' https://accounts.google.com/gsi/style; img-src 'self' data: blob:; connect-src 'self' https://www.googleapis.com https://oauth2.googleapis.com https://accounts.google.com/gsi/; frame-src https://accounts.google.com/gsi/; object-src 'none'; base-uri 'none'; form-action 'none'">
 <meta name="theme-color" content="#17324d">
 <meta name="color-scheme" content="light">
 <meta name="description" content="Laboratorio de formulación de la farmacia: materias primas, fórmulas, PNT y registros de elaboración. Los datos se guardan en este dispositivo.">
@@ -21,6 +21,7 @@
 <script src="modulos/precios.js" defer></script>
 <script src="modulos/ficha.js" defer></script>
 <script src="modulos/conservacion.js" defer></script>
+<script src="modulos/sync.js" defer></script>
 </head>
 <body>
 <div id="app"><noscript>FARMA·LAB necesita JavaScript activado.</noscript></div>
