@@ -323,7 +323,8 @@ async function buildRecordSheetPdf(p, d, s, draftMissing) {
     { label: 'Cantidad elaborada', value: `${fmtNum(p.target_amount)} ${p.unit}` },
     { label: 'Fecha de elaboración', value: fmtDay(p.elaborated_date) },
     { label: 'Fecha de caducidad', value: fmtDay(p.expiry_date) },
-    { label: 'Condiciones de conservación', value: p.storage || '—', span: 3 },
+    p.cn && p.cn.cn ? { label: 'Código nacional', value: p.cn.cn } : null,
+    { label: 'Condiciones de conservación', value: p.storage || '—', span: p.cn && p.cn.cn ? 2 : 3 },
   ], 3, { bg: C.band, pad: mm(4) });
 
   sh.section('Composición');

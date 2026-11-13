@@ -1,4 +1,4 @@
-# FARMA·LAB móvil v0.3.7 (prototipo)
+# FARMA·LAB móvil v0.3.8 (prototipo)
 
 App para Android que se instala desde Chrome y funciona sin conexión. Todos los datos se guardan **en el propio teléfono**.
 
@@ -13,6 +13,10 @@ App para Android que se instala desde Chrome y funciona sin conexión. Todos los
 - **Precio de las fórmulas financiadas** (Comunidad de Madrid), ver abajo.
 - **Documentos**: PNT y bibliografía con su PDF o Word, que se consultan dentro de la app, también sin conexión.
 - Registro de actividad, bloqueo con PIN, exportar e importar copias.
+
+## Novedades de la v0.3.8
+- **Código nacional en la etiqueta**, debajo del nombre de la fórmula («C.N. 500017»). Al generar la etiqueta se elige entre los códigos de la fórmula; por defecto, el de la elaboración o el de la presentación con la misma cantidad. Si la elaboración no tenía código, el elegido se guarda también en ella. Si la fórmula no tiene códigos, se puede escribir a mano.
+- La ficha de registro también muestra el código nacional.
 
 ## Novedades de la v0.3.7
 - **Receta en cada elaboración**: apartado «Receta» para adjuntar la receta en PDF, Word o foto (botón «Hacer foto» con la cámara, o «Elegir archivo»). Se ve dentro de la app y se puede eliminar.

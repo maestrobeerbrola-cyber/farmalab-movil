@@ -540,6 +540,15 @@ function loadPdfLib() {
   return pdfLibPromise;
 }
 
+/** Códigos nacionales que se pueden poner en la etiqueta: los de la fórmula más el de la elaboración. */
+async function labelCns(p) {
+  const f = p.formula_uuid ? await getOne('formula', p.formula_uuid) : null;
+  const list = [...((f && f.national_codes) || [])];
+  if (p.cn && p.cn.cn && !list.some((c) => c.cn === p.cn.cn)) list.unshift(p.cn);
+  return list;
+}
+const CN_RE = /^\d{6}(\.\d)?$|^\d{7}$/;
+
 async function viewLabel(id) {
   const p = await getOne('production', id);
   if (!p) return empty('Este registro no existe.', '');
@@ -552,6 +561,14 @@ async function viewLabel(id) {
   if (!str(p.storage)) warn.push('las condiciones de conservación');
   if (!str(p.route)) warn.push('la vía de administración');
   const copiesMax = s.label.layout === '2' ? 2 : 8;
+  const cns = await labelCns(p);
+  // por defecto, el CN de la elaboración; si no tiene, el de la presentación con la misma cantidad
+  const guess = p.cn ? p.cn.cn : ((cns.find((c) => presentationAmount(c.presentation) === p.target_amount) || {}).cn || '');
+  const cnField = cns.length
+    ? field('Código nacional', `<select name="cn"><option value="">Sin código nacional</option>${cns.map((c) => `<option value="${esc(c.cn)}"${c.cn === guess ? ' selected' : ''}>${esc(`${c.cn}${[c.presentation, c.concentration].filter(Boolean).length ? ` · ${[c.presentation, c.concentration].filter(Boolean).join(', ')}` : ''}`)}</option>`).join('')}</select>`,
+      p.cn ? '' : 'Si eliges uno, se guarda también en la elaboración.')
+    : field('Código nacional', text('cn', 'inputmode="numeric" maxlength="9" placeholder="Opcional"'), 'La fórmula no tiene códigos nacionales. Puedes escribirlo aquí.');
+  if (!guess) warn.push('el código nacional (si la fórmula lo tiene)');
   return `<div class="panel">
       <div class="head-row"><h2 class="big">${esc(p.lot)}</h2>${pill('production', p.status)}</div>
       <p>${esc(p.formula_name)} · ${fmtNum(p.target_amount)} ${esc(p.unit)}</p>
@@ -559,6 +576,7 @@ async function viewLabel(id) {
     ${warn.length ? `<p class="msg warn">Falta ${esc(warn.join(', '))}. La etiqueta se puede generar, pero quedará incompleta.</p>` : ''}
     <form class="form" data-form="label" data-id="${esc(p.uuid)}" novalidate autocomplete="off">
       ${formMsg()}
+      ${cnField}
       ${field('Paciente', text('patient', 'maxlength="120" autocomplete="off"'))}
       <div class="grid2">
         ${field('Prescriptor', text('prescriber', 'maxlength="120" autocomplete="off"'))}
@@ -609,6 +627,7 @@ async function buildLabelPdf(p, extra, s) {
     ph.pharmacist ? [font, 0.85, clean(`Farmacéutico: ${ph.pharmacist}`)] : null,
     ['gap'],
     [bold, L.title / L.base, clean(p.formula_name)],
+    extra.cn ? [bold, 1, clean(`C.N. ${extra.cn.cn}`)] : null,
     [font, 1, clean(`Composición: ${compText}${hasOthers ? `; excipientes c.s.p. ${fmtNum(qty)} ${p.unit}` : ''}.`)],
     edos.length ? [font, 0.9, clean(`Excipientes de declaración obligatoria: ${edos.join(', ')}.`)] : null,
     [font, 1, clean([p.form && `Forma: ${p.form}`, p.route && `Vía: ${p.route}`, `Cantidad: ${fmtNum(qty)} ${p.unit}`].filter(Boolean).join(' · '))],
@@ -675,14 +694,20 @@ Object.assign(FORMS, {
     const extra = {
       patient: str(d.patient).slice(0, 120), prescriber: str(d.prescriber).slice(0, 120), collegiate: str(d.collegiate).slice(0, 30),
       recetario_no: str(d.recetario_no).slice(0, 40), qty: parseNum(d.qty, 'Cantidad'), copies: Math.max(1, Number(d.copies) || 1),
+      cn: null,
     };
+    const cnCode = str(d.cn).replace(/\s+/g, '');
+    if (cnCode) {
+      if (!CN_RE.test(cnCode)) throw new InputError('El código nacional debe tener 6 cifras (o 6 cifras y su dígito de control).');
+      extra.cn = (await labelCns(p)).find((c) => c.cn === cnCode) || { cn: cnCode, presentation: '', concentration: '' };
+    }
     const blob = await buildLabelPdf(p, extra, s);
     const name = `etiqueta-${p.lot}.pdf`;
     state.label = { blob, name };
-    if (extra.recetario_no && !p.recetario_no) {
-      p.recetario_no = extra.recetario_no;
-      await save('production', p, 'actualizar_pesadas', `${p.lot}: nº libro recetario ${p.recetario_no}`);
-    }
+    const changes = [];
+    if (extra.recetario_no && !p.recetario_no) { p.recetario_no = extra.recetario_no; changes.push(`nº libro recetario ${p.recetario_no}`); }
+    if (extra.cn && !p.cn) { p.cn = { cn: extra.cn.cn, presentation: extra.cn.presentation || '', concentration: extra.cn.concentration || '' }; changes.push(`código nacional ${p.cn.cn}`); }
+    if (changes.length) await save('production', p, 'actualizar_pesadas', `${p.lot}: ${changes.join(', ')}`);
     await logOnly('etiqueta_generada', `${p.lot} (${extra.copies} ${extra.copies === 1 ? 'copia' : 'copias'})`);
     const canShare = navigator.canShare && navigator.canShare({ files: [new File([blob], name, { type: 'application/pdf' })] });
     const out = $('#labelOut');
