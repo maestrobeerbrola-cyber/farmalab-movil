@@ -1,4 +1,4 @@
-# FARMA·LAB móvil v0.3.17 (prototipo)
+# FARMA·LAB móvil v0.3.18 (prototipo)
 
 App que se instala desde Chrome o Edge (Android y Windows) y funciona sin conexión. Los datos se guardan **en el propio dispositivo** y, si se configura, se sincronizan entre el móvil y el PC a través de Google Drive.
 
@@ -11,8 +11,17 @@ App que se instala desde Chrome o Edge (Android y Windows) y funciona sin conexi
 - **Avisos en la app**: stock bajo, envases por reponer, caducidades, cuarentena, elaboraciones paradas más de 2 días y datos que faltan.
 - **Calculadora**: cantidad a pesar (% m/m, m/v, v/v, mg/g, mg/ml, ppm, 1:X, mg por unidad) con riqueza, factor sal/base y densidad; conversión de unidades y diluciones.
 - **Precio de las fórmulas financiadas** (Comunidad de Madrid), ver abajo.
+- **Temperaturas** (PN/L/PG/009/00): lectura diaria del local y la nevera, incidencias y registro mensual en PDF.
 - **Documentos**: PNT y bibliografía con su PDF, Word o foto, que se consultan dentro de la app, también sin conexión.
 - Registro de actividad, bloqueo con PIN, exportar e importar copias.
+
+## Novedades de la v0.3.18
+- **Control y registro de temperaturas según el PN/L/PG/009/00 del Formulario Nacional** (Almacén → Temperaturas).
+  - Lectura diaria de la temperatura actual, la máxima y la mínima del local (20–30 ºC) y de la nevera (2–8 ºC), con fecha, hora y firma. Se pueden añadir más neveras o zonas y cambiar los rangos (Ajustes → Temperaturas).
+  - Si una lectura se sale del rango, la app avisa de que no se dispensen los productos afectados y abre el registro de incidencia (anexo IV): temperatura alcanzada, horas de exposición desde la lectura anterior, productos afectados (propone las materias primas y fórmulas que se conservan en ese punto), análisis de causas, evaluación, tratamiento (se acepta o se rechaza), medida correctora, fecha y firma. Numeración correlativa por año (1/2026, 2/2026…).
+  - En Inicio, «Temperaturas de hoy» y avisos: lectura pendiente, lectura fuera de rango sin incidencia e incidencia abierta.
+  - Registro mensual en PDF con el diseño del Formulario Nacional: anexo II a) (gráfico del local), anexo II b) (tabla de actual, máxima y mínima), anexo III (nevera) y anexo IV (incidencias). Sin lecturas sale la hoja en blanco para rellenar a mano.
+  - Las lecturas y las incidencias van en las copias de seguridad y en la sincronización. **Actualiza la app en el móvil y en el PC**: un equipo sin actualizar deja de sincronizar hasta que se actualiza.
 
 ## Novedades de la v0.3.17
 - **Casilla propia para la fecha de caducidad** en el registro de materias primas (anexo II), junto al control de calidad. Si el lote no tiene caducidad, aparece la fecha del próximo control analítico. El registro de acondicionamiento y la ficha 2 ya la tenían.

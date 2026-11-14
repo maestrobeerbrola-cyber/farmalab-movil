@@ -404,7 +404,7 @@ const FN_MP_TITLE = 'Recepción, control de conformidad\ny almacenamiento de mat
  * cabecera azul marino con el título del procedimiento, el código y «Página x de y» (en lila),
  * fila de «Procedimientos relacionados», «ANEXO» en rojo y celdas de etiqueta azules con texto blanco.
  */
-const FN_COLORS = { navy: [27, 53, 93], lilac: [203, 203, 216], crimson: [194, 7, 52], text: [60, 60, 59], grey: [103, 103, 102] };
+const FN_COLORS = { navy: [27, 53, 93], lilac: [203, 203, 216], mes: [155, 156, 179], crimson: [194, 7, 52], text: [60, 60, 59], grey: [103, 103, 102] };
 async function createFnSheet({ code, related, procTitle, pharmacy, subject, draftMissing = [] }) {
   const { PDFDocument, StandardFonts, rgb } = await loadPdfLib();
   const doc = await PDFDocument.create();
@@ -634,7 +634,9 @@ async function createFnSheet({ code, related, procTitle, pharmacy, subject, draf
     return new Blob([await doc.save()], { type: 'application/pdf' });
   };
   newPage();
-  return { mm, heading, draft, form, formHeight, observations, specs, newPage, room: (h) => room(h), finish };
+  /** Acceso al dibujo para los registros con rejilla propia (temperaturas): página actual, fuentes, colores y medidas. */
+  const raw = () => ({ page, font, bold, C, M, CW, W, H, PAD, LBL, VAL, clean, wrap, cell, mm, bottom: M + FOOT });
+  return { mm, heading, draft, form, formHeight, observations, specs, newPage, room: (h) => room(h), finish, raw, at: () => y, moveTo: (v) => { y = v; } };
 }
 
 const MP_DECISION = { aceptado: 'Aceptada', rechazado: 'Rechazada', bloqueado: 'Bloqueada', cuarentena: 'Pendiente (cuarentena)' };

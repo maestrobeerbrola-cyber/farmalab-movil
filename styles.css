@@ -149,7 +149,7 @@ a.row:active { background: var(--paper); }
 .form { display: grid; gap: 16px; }
 .field { display: grid; gap: 6px; font-size: 14px; font-weight: 600; }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-input[type="text"], input[type="password"], input[type="date"], input[type="search"], select, textarea {
+input[type="text"], input[type="password"], input[type="date"], input[type="time"], input[type="month"], input[type="search"], select, textarea {
   width: 100%; min-height: 48px; padding: 10px 12px;
   border: 1px solid var(--field-line); border-radius: 10px;
   background: var(--surface); font-size: 17px; font-weight: 400;
@@ -437,3 +437,20 @@ div.need-empty:not(.display), fieldset.need-empty { box-shadow: 0 0 0 2px var(--
 .need-legend.done { background: var(--green-bg); }
 .need-legend.done strong { color: var(--green-ink); }
 section > h2.need::after { content: " *"; color: var(--red); font-weight: 700; }
+
+/* ---------- temperaturas */
+.seg a { flex: 1 1 auto; padding: 9px 6px; font-size: 14px; }
+.grid3 { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.grid3 .withunit { gap: 4px; }
+.grid3 .withunit span { font-size: 14px; }
+.temp-point .panel > .list { margin: 8px 0 4px; }
+.temp-point .hint { margin: 2px 0 10px; }
+.temp-form { margin-top: 4px; }
+details.more-reading { margin-top: 8px; }
+details.more-reading summary { cursor: pointer; color: var(--green-ink); font-weight: 600; padding: 6px 0; }
+.month-nav { display: flex; justify-content: space-between; gap: 8px; margin: 0 0 10px; }
+.tprow { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 44px; gap: 6px; align-items: center; padding: 10px 0; border-top: 1px solid var(--line); }
+.tprow input[name="tp_name"] { grid-column: 1 / 3; }
+.tprow button { grid-column: 3; grid-row: 1; }
+.tprow select { grid-column: 1 / -1; }
+.list .bad, .sub .bad { color: var(--red); font-weight: 600; }

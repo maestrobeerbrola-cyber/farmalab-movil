@@ -6,12 +6,12 @@
  * sincronizarlo más adelante con la versión de PC.
  */
 
-const APP_VERSION = '0.3.17';
+const APP_VERSION = '0.3.18';
 const PREVIEW = document.documentElement.dataset.preview === '1'; // copia de prueba publicada en Claude
 const DB_NAME = 'farmalab-movil';
 const EXPORT_FORMAT = 'farmalab-datos';
-const EXPORT_FORMAT_VERSION = 3;          // 3: acondicionamiento, bibliografía, documentos de cualquier ficha y ajustes
-const DB_VERSION = 3;                     // 3: acondicionamiento, bibliografía, documentos genéricos, estados de elaboración
+const EXPORT_FORMAT_VERSION = 4;          // 3: acondicionamiento, bibliografía, documentos de cualquier ficha y ajustes · 4: temperaturas
+const DB_VERSION = 4;                     // 3: acondicionamiento, bibliografía, documentos genéricos, estados de elaboración · 4: temperaturas
 const FILE_STORE = 'pnt_file';            // documentos adjuntos (PNT, materias primas, acondicionamiento, bibliografía)
 const MAX_DOC_BYTES = 25 * 1048576;
 const DOC_TYPES = {
@@ -31,7 +31,7 @@ const RECETA_ACCEPT = DOC_ACCEPT;
  * (local_only), no van en las copias ni en la sincronización, y su nombre de archivo no pasa al registro de actividad.
  */
 const isLocalOnly = (f) => Boolean(f && (f.local_only || f.kind === 'receta'));
-const STORES = ['material', 'packaging', 'formula', 'pnt', 'biblio', 'production', 'audit'];
+const STORES = ['material', 'packaging', 'formula', 'pnt', 'biblio', 'production', 'temperature', 'temp_incident', 'audit'];
 const LOCK_HIDDEN_MS = 5 * 60 * 1000;   // bloqueo tras 5 min con la app en segundo plano
 const LOCK_IDLE_MS = 15 * 60 * 1000;    // o tras 15 min sin tocar la pantalla
 const PBKDF2_ITERATIONS = 200000;
@@ -48,10 +48,11 @@ const STATUS = {
   formula: { borrador: 'Borrador', aprobada: 'Aprobada', obsoleta: 'Obsoleta' },
   pnt: { borrador: 'Borrador', vigente: 'Vigente', obsoleto: 'Obsoleto' },
   production: { en_proceso: 'En proceso', elaborada: 'Elaborada', dispensada: 'Dispensada', rechazada: 'Rechazada' },
+  temp_incident: { abierta: 'Abierta', cerrada: 'Cerrada' },
 };
 const TONE = {
   cuarentena: 'amber', aceptado: 'green', rechazado: 'red', bloqueado: 'red', aprobada: 'green', vigente: 'green',
-  en_proceso: 'amber', elaborada: 'blue', dispensada: 'green', rechazada: 'red',
+  en_proceso: 'amber', elaborada: 'blue', dispensada: 'green', rechazada: 'red', abierta: 'red', cerrada: 'green',
 };
 const ACTION_LABELS = {
   inicio_sesion: 'Desbloqueo de la app',
@@ -113,6 +114,8 @@ const SECTIONS = {
   fichamp: { title: 'Registro de la materia prima', tab: 1 },
   registromp: { title: 'Registro de materias primas', tab: 1 },
   registroac: { title: 'Registro de acondicionamiento', tab: 1 },
+  temperaturas: { title: 'Temperaturas', tab: 1 },
+  registrotemp: { title: 'Registro de temperaturas', tab: 1 },
   fichaenv: { title: 'Registro de envase', tab: 1 },
   pnt: { title: 'PNT', tab: 4 },
   biblio: { title: 'Bibliografía', tab: 4 },
@@ -133,6 +136,12 @@ const DEFAULT_EQUIPMENT = [
 ];
 const DEFAULT_QC_TESTS = ['Caracteres organolépticos (aspecto, color, olor)', 'Peso o volumen final', 'Homogeneidad', 'pH'];
 const DEFAULT_MP_QC_TESTS = ['Caracteres organolépticos (aspecto, color, olor)', 'Identificación', 'Solubilidad', 'Comprobación del boletín de análisis del proveedor'];
+/** Puntos de control de temperatura (PN/L/PG/009/00, 4.2): local 25 ± 5 ºC y nevera 5 ± 3 ºC. */
+const DEFAULT_TEMP_POINTS = [
+  { id: 'local', name: 'Local', kind: 'local', min: 20, max: 30 },
+  { id: 'nevera', name: 'Nevera', kind: 'nevera', min: 2, max: 8 },
+];
+const validTempPoint = (p) => Boolean(p && typeof p.id === 'string' && p.id && str(p.name) && ['local', 'nevera'].includes(p.kind) && isNum(p.min) && isNum(p.max) && p.min < p.max);
 const DEFAULT_SETTINGS = {
   pharmacy: { name: '', address: '', phone: '', pharmacist: '' },
   lot: { letter: 'J', next: 1 },
@@ -144,7 +153,8 @@ const DEFAULT_SETTINGS = {
   // años de conservación desde la caducidad y días de aviso antes de borrar
   retention: { enabled: true, production: { general: 1, psicotropo: 2, estupefaciente: 5, veterinaria: 5 }, material: 1, packaging: 1, notice_days: 30 },
   // PNT de recepción, control de conformidad y almacenamiento de materias primas (Formulario Nacional)
-  fn: { mp_code: 'PN/L/PG/005/00', mp_related: '', pack_code: 'PN/L/PG/006/00', pack_related: '' },
+  fn: { mp_code: 'PN/L/PG/005/00', mp_related: '', pack_code: 'PN/L/PG/006/00', pack_related: '', temp_code: 'PN/L/PG/009/00', temp_related: '' },
+  temp: { points: DEFAULT_TEMP_POINTS },
   updated_at: '',
 };
 
@@ -191,7 +201,8 @@ const ALERT_SOURCES = [];   // avisos adicionales de los módulos: async () => [
 const AFTER_UNLOCK = [];    // tareas al desbloquear la app (p. ej. borrado por fin del plazo de conservación)
 const RESTORE_CHECKS = {};  // antes de restaurar: store -> async (registro) => mensaje de error o null
 const BOOT_HOOKS = [];      // al arrancar, antes de pedir el PIN (p. ej. recoger la vuelta del inicio de sesión de Google)
-const SETTINGS_SECTIONS = [];   // apartados de Ajustes que añaden los módulos: async () => html
+const SETTINGS_SECTIONS = [];
+const HOME_BLOCKS = [];         // apartados de Inicio que añaden los módulos, debajo de los avisos: async () => html   // apartados de Ajustes que añaden los módulos: async () => html
 const BEFORE_LOT = [];      // antes de asignar un número de lote: async () => true para seguir, false para no asignarlo
 const AFTER_SAVE = [];      // tras guardar cambios (p. ej. enviarlos al otro equipo); no se esperan
 
@@ -411,6 +422,9 @@ function normalizeSettings(stored) {
   if (!(isNum(s.pricing.iva) && s.pricing.iva >= 0)) s.pricing.iva = DEFAULT_SETTINGS.pricing.iva;
   if (!str(s.fn.mp_code)) s.fn.mp_code = DEFAULT_SETTINGS.fn.mp_code;
   if (!str(s.fn.pack_code)) s.fn.pack_code = DEFAULT_SETTINGS.fn.pack_code;
+  if (!str(s.fn.temp_code)) s.fn.temp_code = DEFAULT_SETTINGS.fn.temp_code;
+  const points = (saved.temp && Array.isArray(saved.temp.points) ? saved.temp.points : []).filter(validTempPoint);
+  s.temp = { points: (points.length ? points : DEFAULT_TEMP_POINTS).map((p) => ({ id: p.id, name: str(p.name).slice(0, 60), kind: p.kind, min: p.min, max: p.max })) };
   return s;
 }
 /**
@@ -528,6 +542,7 @@ function refreshNeeded(form) {
     });
   }
   let legend = $('[data-need-legend]', form);
+  if (rule.legend === false) { if (legend) legend.remove(); return; }
   if (!legend) {
     legend = document.createElement('p');
     legend.className = 'need-legend';
@@ -801,7 +816,7 @@ async function renderRoute() {
   state.objectUrls = [];
   $('#view').innerHTML = html;
   $('#title').textContent = info.title;
-  const sub = Boolean(arg) || ['ajustes', 'auditoria', 'papelera', 'conservacion', 'sincronizacion', 'calculadora', 'valoracion', 'etiqueta', 'registromp', 'registroac'].includes(sec);
+  const sub = Boolean(arg) || ['ajustes', 'auditoria', 'papelera', 'conservacion', 'sincronizacion', 'calculadora', 'valoracion', 'etiqueta', 'registromp', 'registroac', 'registrotemp'].includes(sec);
   $('#backBtn').hidden = !sub;
   $('#mark').hidden = sub;
   $$('.tabbar a').forEach((a, i) => {
@@ -858,7 +873,7 @@ async function computeAlerts() {
   for (const src of ALERT_SOURCES) {
     try { out.push(...(await src())); } catch (err) { console.error(err); }
   }
-  return out;
+  return out.sort((a, b) => (a.tone === 'red' ? 0 : 1) - (b.tone === 'red' ? 0 : 1));   // lo urgente primero
 }
 async function updateAlertBadge() {
   const badge = $('#alertBadge');
@@ -888,7 +903,11 @@ async function viewHome() {
   html += alerts.length
     ? `<ul class="list alerts">${alerts.map((a) => `<li><a class="row" href="${esc(a.href)}"><span class="dot ${a.tone}" aria-hidden="true"></span><div class="row-main"><span class="kind">${esc(a.kind)}</span><strong>${esc(a.title)}</strong><span class="sub">${esc(a.text)}</span></div></a></li>`).join('')}</ul>`
     : '<div class="empty"><strong>Todo en orden.</strong>Sin stock bajo, caducidades próximas ni fichas pendientes.</div>';
-  html += '</section><section><h2>En proceso</h2>';
+  html += '</section>';
+  for (const block of HOME_BLOCKS) {
+    try { html += await block(); } catch (err) { console.error(err); }
+  }
+  html += '<section><h2>En proceso</h2>';
   html += open.length
     ? `<ul class="list">${open.map((p) => `<li><a class="row" href="#elaboraciones--${esc(p.uuid)}"><div class="row-main"><strong>${esc(p.record_code)}</strong><span class="sub"><span>${esc(p.formula_name)}</span><span>${fmtNum(p.target_amount)} ${esc(p.unit)}</span><span>${progressText(p)}</span></span></div></a></li>`).join('')}</ul>`
     : `<div class="empty"><strong>No hay elaboraciones en proceso.</strong><a class="btn secondary small" href="#elaboraciones--nueva">Nueva elaboración</a></div>`;
@@ -988,7 +1007,7 @@ async function viewSettings() {
       ${checkbox('ret_enabled', 'Borrar automáticamente al cumplir el plazo', s.retention.enabled)}
       <p class="hint">Si lo desactivas, solo se muestran los avisos. La clase de cada fórmula (psicótropos, estupefacientes, uso veterinario) se elige en la propia fórmula.</p>
     </div></section>
-    <section><h2>Registros de materias primas y acondicionamiento</h2><div class="panel form">
+    <section><h2>Registros del Formulario Nacional</h2><div class="panel form">
       <div class="grid2">
         ${field('PNT de materias primas', text('fn_mp_code', `value="${esc(s.fn.mp_code)}" maxlength="40"`), 'Formulario Nacional: PN/L/PG/005/00.')}
         ${field('Procedimientos relacionados', text('fn_mp_related', `value="${esc(s.fn.mp_related)}" maxlength="120"`), 'Opcional. Por ejemplo: PN/L/PG/006/00.')}
@@ -996,6 +1015,10 @@ async function viewSettings() {
       <div class="grid2">
         ${field('PNT de acondicionamiento', text('fn_pack_code', `value="${esc(s.fn.pack_code)}" maxlength="40"`), 'Formulario Nacional: PN/L/PG/006/00.')}
         ${field('Procedimientos relacionados', text('fn_pack_related', `value="${esc(s.fn.pack_related)}" maxlength="120"`), 'Opcional.')}
+      </div>
+      <div class="grid2">
+        ${field('PNT de temperaturas', text('fn_temp_code', `value="${esc(s.fn.temp_code)}" maxlength="40"`), 'Formulario Nacional: PN/L/PG/009/00.')}
+        ${field('Procedimientos relacionados', text('fn_temp_related', `value="${esc(s.fn.temp_related)}" maxlength="120"`), 'Opcional.')}
       </div>
       <p class="hint">Aparecen en la cabecera de los registros (anexo II) y de las especificaciones (anexo III).</p>
     </div></section>
@@ -1124,6 +1147,8 @@ function validRecord(store, r) {
     case 'biblio': return s(r.title);
     case 'production': return s(r.record_code) && isNum(r.target_amount) && Array.isArray(r.weighings)
       && r.weighings.every((w) => w && s(w.ingredient) && isNum(w.theoretical) && optNum(w.actual));
+    case 'temperature': return s(r.point_id) && isDay(r.date) && isNum(r.actual) && optNum(r.max) && optNum(r.min);
+    case 'temp_incident': return s(r.code) && s(r.point_id);
     case 'audit': return s(r.action);
     default: return false;
   }
@@ -1522,6 +1547,7 @@ const FORMS = {
       fn: {
         mp_code: str(d.fn_mp_code).slice(0, 40) || DEFAULT_SETTINGS.fn.mp_code, mp_related: str(d.fn_mp_related).slice(0, 120),
         pack_code: str(d.fn_pack_code).slice(0, 40) || DEFAULT_SETTINGS.fn.pack_code, pack_related: str(d.fn_pack_related).slice(0, 120),
+        temp_code: str(d.fn_temp_code).slice(0, 40) || DEFAULT_SETTINGS.fn.temp_code, temp_related: str(d.fn_temp_related).slice(0, 120),
       },
       retention,
       equipment: lines(d.equipment),
