@@ -146,7 +146,7 @@ INPUT_HOOKS.push((t) => {
   const role = $('select[name="role"]', t.closest('[data-comp]'));
   if (!role || role.dataset.touched) return;
   const hit = (state.materials || []).find((m) => fold(m.name) === fold(t.value));
-  if (hit && KIND_LABELS[hit.kind]) role.value = hit.kind;
+  if (hit && ROLE_LABELS[hit.kind]) role.value = hit.kind;   // si se usa como activo o excipiente según la fórmula, se elige a mano
 });
 CHANGE_HOOKS.push((t) => { if (t.matches('select[name="role"]')) t.dataset.touched = '1'; });
 AFTER_RENDER.push(() => { if ($('form[data-form="formula"]')) getAll('material').then((m) => { state.materials = m; }); });

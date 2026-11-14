@@ -2,7 +2,11 @@
 /* FARMA·LAB móvil · Almacén: materias primas (PN/L/PG/005) y material de acondicionamiento (PN/L/PG/006). */
 
 const STORE_TABS = [['#materias', 'Materias primas'], ['#envases', 'Acondicionamiento']];
-const KIND_LABELS = { activo: 'Principio activo', excipiente: 'Excipiente' };
+const KIND_LABELS = { activo: 'Principio activo', excipiente: 'Excipiente', ambos: 'Principio activo o excipiente, según la fórmula' };
+const KIND_TAGS = { activo: 'PA', ambos: 'PA / EXC' };
+const kindTag = (k) => (KIND_TAGS[k] ? `<span class="doc-tag pa">${KIND_TAGS[k]}</span>` : '');
+/** Materias primas cuyo envase sirve de acondicionamiento de la fórmula (vehículos que se elaboran en su propio frasco). */
+const packIncluded = (m) => Boolean(m && m.pack_included && str(m.pack_desc));
 const PACK_KINDS = { primario: 'Primario', secundario: 'Secundario' };
 /** Inspección en la recepción del material de acondicionamiento (PN/L/PG/006, apartado 4.1). */
 const PACK_CHECKS = {
@@ -40,7 +44,7 @@ function stockGroups(records, kind) {
       const q = kind === 'packaging' ? r.quantity : convertQty(r.quantity, r.unit, unit);
       if (isNum(q)) total += q;
     }
-    out.push({ name: ref.name, total: round6(total), unit, min: ref.min_stock, low: total <= ref.min_stock, active: lots.some((r) => r.kind === 'activo'), sample: ref.uuid });
+    out.push({ name: ref.name, total: round6(total), unit, min: ref.min_stock, low: total <= ref.min_stock, active: lots.some((r) => r.kind === 'activo' || r.kind === 'ambos'), sample: ref.uuid });
   }
   return out;
 }
@@ -50,7 +54,7 @@ const stockClass = (r) => (isNum(r.min_stock) && r.min_stock > 0 && r.quantity <
 async function viewMaterials() {
   const items = (await getAll('material')).sort(byText('name'));
   const list = items.length
-    ? `<ul class="list" data-list>${items.map((m) => `<li data-text="${esc(lc([m.name, m.lot, m.internal_no, m.code, m.supplier, m.qc_no].join(' ')))}"><a class="row" href="#materias--${esc(m.uuid)}"><div class="row-main"><strong>${esc(m.name)}${m.internal_no ? ` <span class="code">${esc(m.internal_no)}</span>` : ''}</strong><span class="sub"><span>Lote ${esc(m.lot)}</span><span>Cad. ${fmtDay(m.expiry)}</span><span class="${stockClass(m)}">${fmtNum(m.quantity)} ${esc(m.unit)}</span>${m.kind === 'activo' ? '<span class="doc-tag pa">PA</span>' : ''}${m.edo ? '<span class="doc-tag edo">EDO</span>' : ''}</span></div>${pill('material', m.status)}</a></li>`).join('')}</ul><p class="none" data-none hidden>Ningún lote coincide con la búsqueda.</p>`
+    ? `<ul class="list" data-list>${items.map((m) => `<li data-text="${esc(lc([m.name, m.lot, m.internal_no, m.code, m.supplier, m.qc_no].join(' ')))}"><a class="row" href="#materias--${esc(m.uuid)}"><div class="row-main"><strong>${esc(m.name)}${m.internal_no ? ` <span class="code">${esc(m.internal_no)}</span>` : ''}</strong><span class="sub"><span>Lote ${esc(m.lot)}</span><span>Cad. ${fmtDay(m.expiry)}</span><span class="${stockClass(m)}">${fmtNum(m.quantity)} ${esc(m.unit)}</span>${kindTag(m.kind)}${packIncluded(m) ? '<span class="doc-tag">Envase incluido</span>' : ''}${m.edo ? '<span class="doc-tag edo">EDO</span>' : ''}</span></div>${pill('material', m.status)}</a></li>`).join('')}</ul><p class="none" data-none hidden>Ningún lote coincide con la búsqueda.</p>`
     : empty('Aún no hay materias primas registradas.', 'Registra la primera recepción con «Nuevo lote».');
   return `${segmented(STORE_TABS, '#materias')}${items.length ? searchBox('Buscar nombre, lote, nº interno o proveedor') : ''}${list}${fab('#materias--nueva', 'Nuevo lote')}`;
 }
@@ -79,6 +83,7 @@ async function viewMaterial(id) {
       ['Proveedor', val(m.supplier)],
       ['Lote', val(m.lot)],
       ['Nº control de calidad', val(m.qc_no)],
+      packIncluded(m) ? ['Envase', `${esc(m.pack_desc)} <span class="hint">(sirve de acondicionamiento de la fórmula)</span>`] : null,
       ['Recepción', `${fmtDay(m.received_date)}${m.containers ? ` · ${esc(m.containers)} ${m.containers === 1 ? 'envase' : 'envases'}` : ''}`],
       ['Cantidad recibida', isNum(m.quantity_received) ? `${fmtNum(m.quantity_received)} ${esc(m.unit)}` : '—'],
       ['Stock actual', `<span class="${stockClass(m)}">${fmtNum(m.quantity)} ${esc(m.unit)}</span>${isNum(m.min_stock) ? ` (mínimo ${fmtNum(m.min_stock)} ${esc(m.unit)})` : ''}`],
@@ -153,7 +158,7 @@ function viewMaterialFormHtml(m) {
       ${field('Nombre (DOE o DCI)', text('name', `value="${esc(v.name || '')}" required maxlength="160" data-edo-source`))}
       <p class="hint edo-hint" data-edo-hint>${detected ? `Figura como excipiente de declaración obligatoria: ${esc(detected)}.` : ''}</p>
       <div class="grid2">
-        ${field('Tipo', `<select name="kind">${options(Object.keys(KIND_LABELS), v.kind || 'excipiente', KIND_LABELS)}</select>`)}
+        ${field('Tipo', `<select name="kind">${options(Object.keys(KIND_LABELS), v.kind || 'excipiente', { ...KIND_LABELS, ambos: 'Activo o excipiente' })}</select>`, 'Uso habitual. Lo que cuenta es la función que se marca en cada fórmula.')}
         ${field('Nº registro interno', text('internal_no', `value="${esc(v.internal_no || '')}" maxlength="40"`), 'Vuestro número de control interno.')}
       </div>
       ${checkbox('edo', 'Excipiente de declaración obligatoria', m ? m.edo : Boolean(detected), 'data-edo-check')}
@@ -168,6 +173,8 @@ function viewMaterialFormHtml(m) {
         ${field('Fecha de recepción', dateInput('received_date', v.received_date))}
         ${field('Nº de envases', `<input type="text" inputmode="numeric" name="containers" value="${esc(v.containers ?? '')}" maxlength="5">`)}
       </div>
+      ${checkbox('pack_included', 'Se elabora en su propio envase, que sirve de acondicionamiento de la fórmula', Boolean(v.pack_included), 'data-pack-incl')}
+      <div data-pack-desc${v.pack_included ? '' : ' hidden'}>${field('Descripción del envase', text('pack_desc', `value="${esc(v.pack_desc || '')}" maxlength="160" placeholder="Frasco de plástico de 100 ml con aplicadores"`), 'Por ejemplo, vehículos como Finastopic: el frasco con sus aplicadores es el envase final. Aparece en la guía y en la ficha 2.')}</div>
       <div class="grid2">
         ${field(m ? 'Stock actual' : 'Cantidad recibida', decimal('quantity', `value="${esc(inputNum(v.quantity))}" required`))}
         ${field('Unidad', `<select name="unit">${options(MATERIAL_UNITS, v.unit || 'g')}</select>`)}
@@ -194,6 +201,13 @@ async function viewMaterialForm(id) {
   if (id && !m) return empty('Este lote no existe.', '');
   return viewMaterialFormHtml(m);
 }
+
+// El campo de descripción del envase solo aparece si el envase sirve de acondicionamiento.
+CHANGE_HOOKS.push((t) => {
+  if (!t.matches('[data-pack-incl]')) return;
+  const box = $('[data-pack-desc]', t.form);
+  if (box) box.hidden = !t.checked;
+});
 
 // Aviso automático de excipiente de declaración obligatoria al escribir el nombre.
 INPUT_HOOKS.push((t) => {
@@ -234,6 +248,7 @@ Object.assign(FORMS, {
     if (quantity === null || quantity < 0) throw new InputError('Indica la cantidad.');
     const minStock = parseNum(d.min_stock, 'Stock mínimo');
     const containers = intOrNull(d.containers, 'Nº de envases');
+    if (d.pack_included === 'on' && !str(d.pack_desc)) throw new InputError('Describe el envase que sirve de acondicionamiento (por ejemplo: frasco de plástico de 100 ml con aplicadores).');
     await uniqueInternal('material', internal, prev && prev.uuid);
     if (code && (await getAll('material')).some((m) => m.uuid !== (prev && prev.uuid) && m.code && lc(m.code) === lc(code) && lc(m.lot) === lc(lot))) {
       throw new InputError('Ya existe ese código de artículo con el mismo lote.');
@@ -241,6 +256,7 @@ Object.assign(FORMS, {
     const rec = {
       ...(prev || { uuid: newId(), status: STATUS.material[d.status] ? d.status : 'cuarentena', quantity_received: quantity }),
       name: name.slice(0, 160), kind: KIND_LABELS[d.kind] ? d.kind : 'excipiente', edo: d.edo === 'on', internal_no: internal.slice(0, 40),
+      pack_included: d.pack_included === 'on', pack_desc: d.pack_included === 'on' ? str(d.pack_desc).slice(0, 160) : '',
       supplier: str(d.supplier).slice(0, 160), lot: lot.slice(0, 100), qc_no: str(d.qc_no).slice(0, 80),
       received_date: isDay(d.received_date) ? d.received_date : null, containers,
       quantity, unit: MATERIAL_UNITS.includes(d.unit) ? d.unit : 'g', min_stock: minStock,

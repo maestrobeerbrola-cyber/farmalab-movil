@@ -130,6 +130,31 @@ function packRow(u = {}, packs = state.packs || []) {
     <button type="button" class="icon-btn quiet" data-act="removeRow" aria-label="Quitar">${ICON.x}</button>
   </div>`;
 }
+/** Lote de una pesada cuyo envase sirve de acondicionamiento (vehículos que se elaboran en su propio frasco). */
+function includedPackFor(w, mats = state.materials || []) {
+  const m = (w.material_uuid && mats.find((x) => x.uuid === w.material_uuid)) || findMaterialLot(mats, w.ingredient, w.material_lot);
+  if (m) return packIncluded(m) ? m : null;
+  return mats.find((x) => fold(x.name) === fold(w.ingredient) && packIncluded(x)) || null;   // aún sin lote: vale la descripción de otro lote
+}
+/** Casillas «envase incluido» de la guía: una por cada producto que se elabora en su propio envase. */
+function includedPackRows(p) {
+  const used = p.packaging_used || [];
+  const seen = new Set();
+  return (p.weighings || []).map((w, i) => {
+    if (seen.has(fold(w.ingredient))) return '';
+    const m = includedPackFor(w);
+    const u = used.find((x) => x.included && fold(x.ingredient) === fold(w.ingredient));
+    if (!m && !u) return '';
+    seen.add(fold(w.ingredient));
+    const desc = m ? m.pack_desc : u.desc;
+    const declined = (p.pack_incl_off || []).includes(fold(w.ingredient));   // se desmarcó a propósito
+    const checked = u ? true : !used.length && !declined;   // la primera vez se propone marcado
+    return `<div class="incl-pack"><input type="hidden" name="pack_incl_shown" value="${i}">
+      ${checkbox('pack_incl', `Envase de <strong>${esc(w.ingredient)}</strong>: ${esc(desc)}${w.material_lot ? ` <span class="code">lote ${esc(w.material_lot)}</span>` : ''}`, checked, `value="${i}"`)}
+      <label class="incl-qty"><input type="text" inputmode="numeric" name="pack_incl_qty_${i}" maxlength="4" value="${esc(u ? u.qty : 1)}" aria-label="Unidades del envase de ${esc(w.ingredient)}"><span>uds.</span></label>
+    </div>`;
+  }).join('');
+}
 function qcRow(t = {}) {
   return `<div class="qcrow" data-comp>
     <input type="text" name="qc_test" aria-label="Prueba" placeholder="Prueba" maxlength="120" value="${esc(t.test || '')}">
@@ -201,8 +226,11 @@ async function viewProduction(id) {
   }).join('');
 
   const packUsed = p.packaging_used || [];
+  const regularPacks = packUsed.filter((u) => !u.included);
+  const inclRows = editableGuide ? includedPackRows(p) : '';
   const packSection = editableGuide
-    ? `<div data-rows="pack">${(packUsed.length ? packUsed : [{}]).map((u) => packRow(u)).join('')}</div>
+    ? `${inclRows ? `<div class="panel incl-packs" data-incl-pack>${inclRows}<p class="hint">Este envase no se descuenta aparte: va con la materia prima. Si además usas otro envase o una caja, añádelo abajo.</p></div>` : ''}
+       <div data-rows="pack">${(regularPacks.length ? regularPacks : [{}]).map((u) => packRow(u)).join('')}</div>
        <button type="button" class="btn secondary small" data-act="addRow" data-kind="pack">${ICON.plus}Añadir envase</button>
        <p class="hint">${open ? 'Se descuenta del stock al marcarla como elaborada.' : 'Al guardar la guía se descuenta del stock lo que añadas (y se repone lo que quites).'}</p>`
     : (packUsed.length ? `<ul class="list">${packUsed.map((u) => `<li><div class="row"><span class="row-main">${esc(u.name)}${u.lot ? ` <span class="code">lote ${esc(u.lot)}</span>` : ''}</span><b class="num">${fmtNum(u.qty)} uds.</b></div></li>`).join('')}</ul>` : '<p class="hint none-docs">Sin material de acondicionamiento registrado.</p>');
@@ -328,8 +356,30 @@ function readGuide(form, rec) {
     });
   }
   if (form.querySelector('[data-rows="pack"]')) {
+    const before = rec.packaging_used || [];
     const uuids = all.getAll('pack_uuid'); const qtys = all.getAll('pack_qty');
     rec.packaging_used = [];
+    // Envase incluido con una materia prima (no tiene stock propio: va con ella).
+    const inclOn = all.getAll('pack_incl');
+    const off = new Set(rec.pack_incl_off || []);
+    all.getAll('pack_incl_shown').forEach((v) => {
+      const w = rec.weighings[Number(v)];
+      if (!w) return;
+      if (inclOn.includes(v)) off.delete(fold(w.ingredient)); else off.add(fold(w.ingredient));
+    });
+    rec.pack_incl_off = [...off];
+    inclOn.forEach((v) => {
+      const i = Number(v);
+      const w = rec.weighings[i];
+      if (!w) return;
+      const qty = intOrNull(all.get(`pack_incl_qty_${i}`), `Unidades del envase de ${w.ingredient}`) || 1;
+      if (qty <= 0) throw new InputError(`Las unidades del envase de ${w.ingredient} deben ser mayores que cero.`);
+      const m = includedPackFor(w);
+      const prev = before.find((x) => x.included && fold(x.ingredient) === fold(w.ingredient));
+      const desc = m ? m.pack_desc : prev ? prev.desc : '';
+      if (!desc) return;
+      rec.packaging_used.push({ included: true, ingredient: w.ingredient, material_uuid: m ? m.uuid : null, desc, name: `${desc} (envase de ${w.ingredient})`, lot: w.material_lot || '', qty });
+    });
     uuids.forEach((u, i) => {
       if (!u) return;
       const pk = (state.packs || []).find((x) => x.uuid === u);
@@ -379,6 +429,7 @@ function planConsumption(rec, mats, packs) {
     totals.set(k, { store: 'material', rec: m, amount: round6((totals.get(k)?.amount || 0) + amount), unit: m.unit });
   }
   for (const u of rec.packaging_used || []) {
+    if (u.included) continue;   // va con la materia prima, que ya se descuenta en su pesada
     const pk = packs.find((x) => x.uuid === u.packaging_uuid);
     if (!pk) { notes.push(`${u.name}: ya no está registrado, no se descuenta`); continue; }
     const k = `packaging:${pk.uuid}`;
@@ -432,8 +483,8 @@ Object.assign(FORMS, {
     let packEntries = []; let packAudit = [];
     if (wasStatus !== 'en_proceso' && rec.stock_applied) {
       const delta = new Map();
-      packsBefore.forEach((u) => delta.set(u.packaging_uuid, (delta.get(u.packaging_uuid) || 0) - u.qty));
-      (rec.packaging_used || []).forEach((u) => delta.set(u.packaging_uuid, (delta.get(u.packaging_uuid) || 0) + u.qty));
+      packsBefore.filter((u) => !u.included).forEach((u) => delta.set(u.packaging_uuid, (delta.get(u.packaging_uuid) || 0) - u.qty));
+      (rec.packaging_used || []).filter((u) => !u.included).forEach((u) => delta.set(u.packaging_uuid, (delta.get(u.packaging_uuid) || 0) + u.qty));
       const packs = await getAll('packaging');
       const changes = [...delta.entries()].filter(([, d]) => d !== 0).map(([uuid, d]) => ({ pk: packs.find((x) => x.uuid === uuid), d })).filter((c) => c.pk);
       if (changes.length) {

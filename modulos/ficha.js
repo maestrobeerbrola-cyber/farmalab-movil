@@ -441,6 +441,7 @@ async function buildMaterialSheetPdf(m, s, bulletins, draftMissing) {
     { label: 'Número de lote', value: m.lot },
     { label: 'Proveedor', value: m.supplier || '—' },
     { label: 'Código de artículo', value: m.code || '—' },
+    packIncluded(m) ? { label: 'Envase (acondicionamiento de la fórmula)', value: m.pack_desc, span: 3 } : null,
     { label: 'Cantidad recibida', value: `${fmtNum(qty)} ${m.unit}${m.containers ? ` en ${m.containers} ${m.containers === 1 ? 'envase' : 'envases'}` : ''}` },
     { label: 'Fecha de recepción', value: fmtDay(m.received_date) },
     { label: 'Fecha de caducidad', value: fmtDay(m.expiry) },

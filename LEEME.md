@@ -1,4 +1,4 @@
-# FARMA·LAB móvil v0.3.11 (prototipo)
+# FARMA·LAB móvil v0.3.12 (prototipo)
 
 App que se instala desde Chrome o Edge (Android y Windows) y funciona sin conexión. Los datos se guardan **en el propio dispositivo** y, si se configura, se sincronizan entre el móvil y el PC a través de Google Drive.
 
@@ -13,6 +13,10 @@ App que se instala desde Chrome o Edge (Android y Windows) y funciona sin conexi
 - **Precio de las fórmulas financiadas** (Comunidad de Madrid), ver abajo.
 - **Documentos**: PNT y bibliografía con su PDF o Word, que se consultan dentro de la app, también sin conexión.
 - Registro de actividad, bloqueo con PIN, exportar e importar copias.
+
+## Novedades de la v0.3.12
+- **Envase incluido con la materia prima.** Para vehículos que se elaboran en su propio frasco (por ejemplo, Finastopic), la ficha del lote tiene la casilla «Se elabora en su propio envase» y la descripción del envase. En la guía de elaboración aparece ya propuesto como material de acondicionamiento, con el lote del vehículo usado; no se descuenta aparte del stock de envases y figura en la ficha 2.
+- **Materias primas que pueden ser activo o excipiente** (por ejemplo, el bicarbonato sódico): nuevo tipo «Activo o excipiente». Lo que cuenta en etiquetas, fichas y valoración es la función que se marca en cada fórmula.
 
 ## Novedades de la v0.3.11
 - **Sincronización del móvil y el PC con Google Drive** (Ajustes → Sincronización móvil y PC). Los datos van a la carpeta oculta de la app en el Drive de la cuenta configurada (permiso `drive.appdata`: la app no ve ni toca ningún otro archivo). Se juntan los cambios de los dos equipos: gana la versión más reciente de cada registro y no se borra nada, salvo lo borrado por fin del plazo de conservación. Las recetas y el PIN no se sincronizan.

@@ -414,3 +414,10 @@ p.intro { margin: 0 4px 12px; }
 @media (prefers-reduced-motion: reduce) { .sync-btn[data-state="busy"] svg { animation: none; opacity: .55; } }
 ol.steps { margin: 0; padding-left: 22px; display: grid; gap: 10px; }
 ol.steps code { overflow-wrap: anywhere; font-size: 14px; background: var(--gray-bg); padding: 1px 5px; border-radius: 4px; }
+/* Envase incluido con una materia prima (vehículo que se elabora en su propio frasco) */
+.incl-packs { margin-bottom: 12px; }
+.incl-pack { display: flex; align-items: center; gap: 12px; }
+.incl-pack + .incl-pack { border-top: 1px solid var(--line); margin-top: 6px; padding-top: 6px; }
+.incl-pack .check { flex: 1; min-width: 0; }
+.incl-qty { display: flex; align-items: center; gap: 6px; font-size: 15px; color: var(--muted); }
+.incl-qty input { width: 60px; min-height: 44px; padding: 8px 10px; font-size: 16px; text-align: right; }
