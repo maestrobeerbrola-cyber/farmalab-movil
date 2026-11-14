@@ -495,11 +495,7 @@ function mpObservation(m, bulletins = []) {
   }
   const r = lastReview(m);
   if (r) parts.push(`Revisión anual: ${fmtDay(r.date)} (${r.by})`);
-  const c = m.closure || {};
-  if (archiveReason(m) === 'terminada') parts.push(`Lote terminado el ${fmtDay(c.date)}${c.by ? ` (${c.by})` : ''}`);
-  else if (archiveReason(m) === 'caducada') {
-    parts.push(m.closure ? `Caducado: ${lc(DISPOSALS[c.method] || 'retirado')} el ${fmtDay(c.date)}${c.detail ? ` (${c.detail})` : ''}${c.by ? ` por ${c.by}` : ''}` : (m.quantity > 0 ? 'Caducado: eliminación pendiente de registrar' : 'Caducado, sin existencias'));
-  }
+  if (closureNote(m)) parts.push(closureNote(m));
   if (str(m.observations)) parts.push(m.observations);
   return parts.join('. ').replace(/\.\./g, '.');
 }
@@ -687,6 +683,7 @@ function packObservation(p, used = []) {
   (Array.isArray(p.eliminations) ? p.eliminations : []).forEach((e) => parts.push(`Eliminadas ${fmtNum(e.qty)} uds. por ${PACK_ELIMINATION[e.reason] || e.reason} el ${fmtDay(e.date)}${e.by ? ` (${e.by})` : ''}`));
   const r = lastReview(p);
   if (r) parts.push(`Revisión anual: ${fmtDay(r.date)} (${r.by})`);
+  if (closureNote(p)) parts.push(closureNote(p));
   if (str(p.observations)) parts.push(p.observations);
   if (used.length) parts.push(`Utilizado en: ${used.slice(0, 12).map((u) => `${u.lot} (${fmtNum(u.qty)} uds.)`).join(', ')}${used.length > 12 ? ` y ${used.length - 12} más` : ''}`);
   return parts.join('. ').replace(/\.\./g, '.');

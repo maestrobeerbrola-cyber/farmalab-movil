@@ -6,7 +6,7 @@
  * sincronizarlo más adelante con la versión de PC.
  */
 
-const APP_VERSION = '0.3.22';
+const APP_VERSION = '0.3.23';
 const PREVIEW = document.documentElement.dataset.preview === '1'; // copia de prueba publicada en Claude
 const DB_NAME = 'farmalab-movil';
 const EXPORT_FORMAT = 'farmalab-datos';
@@ -863,11 +863,11 @@ async function computeAlerts() {
     .sort((a, b) => a[1].expiry.localeCompare(b[1].expiry));
   for (const [sec, r] of expiring) {
     const d = daysUntil(r.expiry);
-    const when = d < 0 ? (sec === 'materias' ? `Caducó el ${fmtDay(r.expiry)}: retíralo y registra su eliminación` : `Caducado el ${fmtDay(r.expiry)}`) : d === 0 ? 'Caduca hoy' : `Caduca el ${fmtDay(r.expiry)} (${d} ${d === 1 ? 'día' : 'días'})`;
+    const when = d < 0 ? `Caducó el ${fmtDay(r.expiry)}: retíralo y registra su eliminación` : d === 0 ? 'Caduca hoy' : `Caduca el ${fmtDay(r.expiry)} (${d} ${d === 1 ? 'día' : 'días'})`;
     out.push({ tone: d < 0 ? 'red' : 'amber', kind: 'Caducidad', title: r.name, text: `Lote ${r.lot || '—'}. ${when}`, href: `#${sec}--${r.uuid}` });
   }
   for (const [sec, r] of [...mats.map((m) => ['materias', m]), ...packs.map((p) => ['envases', p])]) {
-    if (r.status === 'cuarentena' && !(sec === 'materias' && lotArchived(r))) out.push({ tone: 'amber', kind: 'En cuarentena', title: r.name, text: `Lote ${r.lot || '—'}: pendiente de aceptación o rechazo`, href: `#${sec}--${r.uuid}` });
+    if (r.status === 'cuarentena' && !lotArchived(r)) out.push({ tone: 'amber', kind: 'En cuarentena', title: r.name, text: `Lote ${r.lot || '—'}: pendiente de aceptación o rechazo`, href: `#${sec}--${r.uuid}` });
   }
   for (const p of prods) {
     if (p.status === 'en_proceso') {
@@ -923,7 +923,7 @@ async function viewHome() {
     : `<div class="empty"><strong>No hay elaboraciones en proceso.</strong><a class="btn secondary small" href="#elaboraciones--nueva">Nueva elaboración</a></div>`;
   html += `</section><section><h2>Registros</h2><ul class="list counts">
     <li><a class="row" href="#materias"><span class="row-main">Materias primas en uso</span><b>${mats.filter((m) => !lotArchived(m)).length}</b></a></li>
-    <li><a class="row" href="#envases"><span class="row-main">Material de acondicionamiento</span><b>${packs.length}</b></a></li>
+    <li><a class="row" href="#envases"><span class="row-main">Acondicionamiento en uso</span><b>${packs.filter((p) => !lotArchived(p)).length}</b></a></li>
     <li><a class="row" href="#formulas"><span class="row-main">Fórmulas</span><b>${forms.length}</b></a></li>
     <li><a class="row" href="#elaboraciones"><span class="row-main">Elaboraciones</span><b>${prods.length}</b></a></li>
     <li><a class="row" href="#pnt"><span class="row-main">PNT</span><b>${pnts.length}</b></a></li>

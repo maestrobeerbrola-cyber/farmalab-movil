@@ -123,7 +123,7 @@ AFTER_RENDER.push(() => { const f = $('form[data-form="productionNew"]'); if (f)
 
 // ------------------------------------------------------------------ guía de elaboración
 function packRow(u = {}, packs = state.packs || []) {
-  const opts = packs.filter((p) => p.status === 'aceptado' || p.uuid === u.packaging_uuid);
+  const opts = packs.filter((p) => (p.status === 'aceptado' && !lotArchived(p)) || p.uuid === u.packaging_uuid);   // sin el terminado ni el caducado
   return `<div class="packrow" data-comp>
     <select name="pack_uuid" aria-label="Envase"><option value="">Elegir envase</option>${opts.map((p) => `<option value="${esc(p.uuid)}"${p.uuid === u.packaging_uuid ? ' selected' : ''}>${esc(p.name)}${p.capacity ? ` ${esc(p.capacity)}` : ''}${p.lot ? `, lote ${esc(p.lot)}` : ''} (quedan ${fmtNum(p.quantity)})</option>`).join('')}</select>
     <input type="text" inputmode="numeric" name="pack_qty" aria-label="Unidades" placeholder="Uds." maxlength="5" value="${esc(u.qty ?? '1')}">

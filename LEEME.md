@@ -1,4 +1,4 @@
-# FARMA·LAB móvil v0.3.22 (prototipo)
+# FARMA·LAB móvil v0.3.23 (prototipo)
 
 App que se instala desde Chrome o Edge (Android y Windows) y funciona sin conexión. Los datos se guardan **en el propio dispositivo** y, si se configura, se sincronizan entre el móvil y el PC a través de Google Drive.
 
@@ -14,6 +14,10 @@ App que se instala desde Chrome o Edge (Android y Windows) y funciona sin conexi
 - **Temperaturas** (PN/L/PG/009/00): lectura diaria del local y la nevera, incidencias y registro mensual en PDF.
 - **Documentos**: PNT y bibliografía con su PDF, Word o foto, que se consultan dentro de la app, también sin conexión.
 - Registro de actividad, bloqueo con PIN, exportar e importar copias.
+
+## Novedades de la v0.3.23
+- **El archivo también para el material de acondicionamiento** (Almacén → Acondicionamiento → «Terminados, caducados y rechazados»): «Marcar como terminado», paso automático al archivo al caducar, con registro de la eliminación de las unidades que queden, y «Devolver a la lista» si hay un error. Los envases archivados ya no se proponen en la guía de elaboración ni en las etiquetas de estado.
+- **Los lotes rechazados pasan al archivo al registrar su destino** (devolución al proveedor o eliminación), tanto de materias primas como de acondicionamiento. Mientras no se registre, siguen en la lista con su formulario de destino. Desde la ficha archivada se puede anular el registro del destino.
 
 ## Novedades de la v0.3.22
 - **Archivo de materias primas terminadas y caducadas** (Almacén → Materias primas → «Terminadas y caducadas»). Un lote aceptado se marca como terminado desde su ficha («Marcar como terminada»): sale de la lista, su stock pasa a 0 y queda en el archivo con la fecha y tu nombre. Si caduca, pasa solo al archivo; si aún tiene existencias, se pide retirarlo y registrar su devolución al proveedor o su eliminación (aviso rojo hasta que se registre). Los lotes archivados conservan su ficha, sus documentos y las elaboraciones en que se usaron, siguen en el registro en PDF (con la terminación o la eliminación en «Observaciones») y ya no se proponen en las elaboraciones ni en las etiquetas de estado. Un lote terminado por error se devuelve a la lista desde su ficha.
