@@ -1,7 +1,7 @@
 'use strict';
 /* FARMA·LAB móvil · Registros del RD 175/2001 en PDF A4:
    materias primas: registro (anexo II) y especificaciones (anexo III) del PN/L/PG/005/00 del Formulario Nacional;
-   registro de material de acondicionamiento (apartado 3.3 y PN/L/PG/006, anexo II), y
+   material de acondicionamiento: registro (anexo II) del PN/L/PG/006/00 del Formulario Nacional, y
    ficha 2, registro de formulación magistral (apartado 3.4.2). */
 
 ROUTES.ficha = (arg) => viewRecordSheet(arg);
@@ -529,44 +529,25 @@ async function createFnSheet({ code, related, procTitle, pharmacy, subject, draf
     y -= h + mm(4);
   };
 
-  /** Anexo II: la ficha de registro de un lote, con sus celdas en el orden y la proporción del modelo. */
-  const registerCard = (v) => {
-    const X = (f) => M + f * CW;
-    const W2 = (a, b) => (b - a) * CW;
-    const g1 = [0, 0.161, 0.398, 0.645, 1];
-    const g4 = [0, 0.161, 0.284, 0.398, 0.645, 0.782, 1];
-    const g5 = [0, 0.398, 0.645, 1];
-    const r1 = Math.max(28, needLabel('Registro interno', W2(0, 0.161), 0), need(v.internal, W2(0.161, 0.398), 0), need(v.name, W2(0.645, 1), 0));
-    const r2 = Math.max(15, need(v.supplier, W2(0.161, 0.398), 0), need(v.lot, W2(0.645, 1), 0));
-    const r3 = Math.max(28, need(v.qc, W2(0.161, 1), 0));
-    const r4 = Math.max(28, need(v.qty, W2(0.398, 0.645), 0), need(v.containers, W2(0.782, 1), 0));
-    const r5 = 15;
-    const r6 = Math.max(40, need(v.decision, W2(0, 0.398), 0), need(v.signer, W2(0.645, 1), 0));
+  /**
+   * Ficha del modelo: filas de celdas con su posición (fracciones del ancho) y su alto mínimo.
+   * Cada celda es una etiqueta (fondo azul, texto blanco) o un valor (blanco, con borde azul).
+   */
+  const form = (rows) => {
+    const top0 = y;
     let top = y;
-    cell(X(g1[0]), top, W2(g1[0], g1[1]), r1, { label: 'Registro interno' });
-    cell(X(g1[1]), top, W2(g1[1], g1[2]), r1, { value: v.internal });
-    cell(X(g1[2]), top, W2(g1[2], g1[3]), r1, { label: 'Nombre del producto' });
-    cell(X(g1[3]), top, W2(g1[3], g1[4]), r1, { value: v.name });
-    top -= r1;
-    cell(X(g1[0]), top, W2(g1[0], g1[1]), r2, { label: 'Proveedor' });
-    cell(X(g1[1]), top, W2(g1[1], g1[2]), r2, { value: v.supplier });
-    cell(X(g1[2]), top, W2(g1[2], g1[3]), r2, { label: 'Lote' });
-    cell(X(g1[3]), top, W2(g1[3], g1[4]), r2, { value: v.lot });
-    top -= r2;
-    cell(X(0), top, W2(0, 0.161), r3, { label: 'Control de calidad' });
-    cell(X(0.161), top, W2(0.161, 1), r3, { value: v.qc });
-    top -= r3;
-    const l4 = ['Fecha de recepción', v.received, 'Cantidad', v.qty, 'Número de envases', v.containers];
-    for (let i = 0; i < 6; i += 1) cell(X(g4[i]), top, W2(g4[i], g4[i + 1]), r4, i % 2 ? { value: l4[i] } : { label: l4[i] });
-    top -= r4;
-    ['Decisión final', 'Fecha', 'Firma'].forEach((t, i) => cell(X(g5[i]), top, W2(g5[i], g5[i + 1]), r5, { label: t }));
-    top -= r5;
-    [v.decision, v.date, v.signer].forEach((t, i) => cell(X(g5[i]), top, W2(g5[i], g5[i + 1]), r6, { value: t }));
-    top -= r6;
-    page.drawRectangle({ x: M, y: top, width: CW, height: y - top, borderColor: C.navy, borderWidth: 0.9 });
+    for (const r of rows) {
+      const h = Math.max(r.h, ...r.cells.map((c) => {
+        const w = (c.to - c.from) * CW;
+        return c.label ? needLabel(c.label, w, 0) : need(c.value, w, 0);
+      }));
+      r.cells.forEach((c) => cell(M + c.from * CW, top, (c.to - c.from) * CW, h, c.label ? { label: c.label, middle: c.middle } : { value: c.value, center: c.center }));
+      top -= h;
+    }
+    page.drawRectangle({ x: M, y: top, width: CW, height: top0 - top, borderColor: C.navy, borderWidth: 0.9 });
     y = top - mm(5);
   };
-  const cardHeight = (v) => 28 + 15 + 28 + 28 + 15 + 40 + 6 + str(v.name).length / 4;   // aproximado, para saltar de página antes
+  const formHeight = (rows) => rows.reduce((n, r) => n + r.h, 0) + 24;
   /** «Observaciones:» bajo la ficha, como en el modelo, con el texto a continuación. */
   const observations = (text, { minH = mm(16) } = {}) => {
     page.drawText('Observaciones:', { x: M + mm(3.5), y: y - 9, size: 9, font, color: C.text });
@@ -653,7 +634,7 @@ async function createFnSheet({ code, related, procTitle, pharmacy, subject, draf
     return new Blob([await doc.save()], { type: 'application/pdf' });
   };
   newPage();
-  return { mm, heading, draft, registerCard, cardHeight, observations, specs, newPage, room: (h) => room(h), finish };
+  return { mm, heading, draft, form, formHeight, observations, specs, newPage, room: (h) => room(h), finish };
 }
 
 const MP_DECISION = { aceptado: 'Aceptada', rechazado: 'Rechazada', bloqueado: 'Bloqueada', cuarentena: 'Pendiente (cuarentena)' };
@@ -684,23 +665,43 @@ function mpObservation(m, bulletins = []) {
   if (packIncluded(m)) parts.push(`Su envase sirve de acondicionamiento: ${m.pack_desc}`);
   if (m.status === 'rechazado') {
     const d = m.disposal;
-    parts.push(d && DISPOSALS[d.method] ? `${DISPOSALS[d.method]} el ${fmtDay(d.date)}${d.detail ? ` (${d.detail})` : ''}${d.by ? `, ${d.by}` : ''}` : 'Destino del lote rechazado pendiente de registrar');
+    parts.push(d && DISPOSALS[d.method] ? `${DISPOSALS[d.method]} el ${fmtDay(d.date)}${d.detail ? ` (${d.detail})` : ''}${d.by ? ` por ${d.by}` : ''}` : 'Destino del lote rechazado pendiente de registrar');
   }
   const r = lastReview(m);
   if (r) parts.push(`Revisión anual: ${fmtDay(r.date)} (${r.by})`);
   if (str(m.observations)) parts.push(m.observations);
   return parts.join('. ').replace(/\.\./g, '.');
 }
-/** Anexo II: una ficha de registro por lote, cada una con sus observaciones debajo. */
-async function drawMpRegister(sh, lots, bulletinsOf) {
-  sh.heading('ANEXO II', 'Registro de materias primas');
+/** Celdas del anexo II del PN/L/PG/005/00, en el orden y la proporción del modelo. */
+function mpCardRows(v) {
+  const L = (from, to, label) => ({ from, to, label });
+  const V = (from, to, value) => ({ from, to, value });
+  return [
+    { h: 28, cells: [L(0, 0.161, 'Registro interno'), V(0.161, 0.398, v.internal), L(0.398, 0.645, 'Nombre del producto'), V(0.645, 1, v.name)] },
+    { h: 15, cells: [L(0, 0.161, 'Proveedor'), V(0.161, 0.398, v.supplier), L(0.398, 0.645, 'Lote'), V(0.645, 1, v.lot)] },
+    { h: 28, cells: [L(0, 0.161, 'Control de calidad'), V(0.161, 1, v.qc)] },
+    { h: 28, cells: [L(0, 0.161, 'Fecha de recepción'), V(0.161, 0.284, v.received), L(0.284, 0.398, 'Cantidad'), V(0.398, 0.645, v.qty), L(0.645, 0.782, 'Número de envases'), V(0.782, 1, v.containers)] },
+    { h: 15, cells: [L(0, 0.398, 'Decisión final'), L(0.398, 0.645, 'Fecha'), L(0.645, 1, 'Firma')] },
+    { h: 40, cells: [V(0, 0.398, v.decision), V(0.398, 0.645, v.date), V(0.645, 1, v.signer)] },
+  ];
+}
+/** Anexo II (registro): una ficha por registro, cada una con sus observaciones debajo; varias por página. */
+function drawRegisterCards(sh, items, { annex, title, rowsOf, obsOf }) {
+  sh.heading(annex, title);
   sh.draft();
-  lots.forEach((m, i) => {
-    const v = mpCardValues(m);
-    const obsLines = Math.ceil(mpObservation(m, bulletinsOf(m)).length / 120) + 1;
-    if (i && !sh.room(sh.cardHeight(v) + 16 + obsLines * 11)) { sh.newPage(); sh.heading('ANEXO II', 'Registro de materias primas'); }
-    sh.registerCard(v);
-    sh.observations(mpObservation(m, bulletinsOf(m)), { minH: lots.length > 1 ? sh.mm(8) : sh.mm(30) });
+  items.forEach((it, i) => {
+    const rows = rowsOf(it);
+    const obs = obsOf(it);
+    const obsLines = Math.ceil(obs.length / 120) + 1;
+    if (i && !sh.room(sh.formHeight(rows) + 16 + obsLines * 11)) { sh.newPage(); sh.heading(annex, title); }
+    sh.form(rows);
+    sh.observations(obs, { minH: items.length > 1 ? sh.mm(8) : sh.mm(30) });
+  });
+}
+async function drawMpRegister(sh, lots, bulletinsOf) {
+  drawRegisterCards(sh, lots, {
+    annex: 'ANEXO II', title: 'Registro de materias primas',
+    rowsOf: (m) => mpCardRows(mpCardValues(m)), obsOf: (m) => mpObservation(m, bulletinsOf(m)),
   });
 }
 /** Anexo III: especificaciones de la materia prima. */
@@ -779,38 +780,97 @@ async function buildMpRegisterPdf(lots, s, period) {
   return sh.finish();
 }
 
-ROUTES.registromp = () => viewMpRegister();
-async function viewMpRegister() {
-  state.parent = '#materias';
+const REGISTERS = {
+  mp: { store: 'material', back: '#materias', title: 'Registro de materias primas', code: (s) => s.fn.mp_code,
+    what: 'una ficha por lote, por fecha de recepción, con sus observaciones (caducidad, recepción, control de conformidad, destino de los rechazados y revisión anual)', label: 'Lotes recibidos en' },
+  ac: { store: 'packaging', back: '#envases', title: 'Registro de material de acondicionamiento', code: (s) => s.fn.pack_code,
+    what: 'una ficha por material recibido, por fecha de recepción, con sus observaciones (inspección en la recepción, revisión anual y eliminación de material caducado u obsoleto)', label: 'Material recibido en' },
+};
+ROUTES.registromp = () => viewRegister('mp');
+ROUTES.registroac = () => viewRegister('ac');
+async function viewRegister(kind) {
+  const R = REGISTERS[kind];
+  state.parent = R.back;
   state.label = null;
   const s = await loadSettings();
-  const lots = await getAll('material');
-  const years = [...new Set(lots.map((m) => String(m.received_date || m.created_at || '').slice(0, 4)).filter((y) => /^\d{4}$/.test(y)))].sort().reverse();
+  const items = await getAll(R.store);
+  const years = [...new Set(items.map((m) => String(m.received_date || m.created_at || '').slice(0, 4)).filter((y) => /^\d{4}$/.test(y)))].sort().reverse();
   const current = String(new Date().getFullYear());
   if (!years.includes(current)) years.unshift(current);
   return `<div class="panel stack">
-      <h2 class="big">Registro de materias primas</h2>
-      <p>Anexo II del ${esc(s.fn.mp_code)} del Formulario Nacional: un lote por línea, por fecha de recepción, con sus observaciones (caducidad, recepción, control de conformidad, destino de los rechazados y revisión anual).</p>
+      <h2 class="big">${esc(R.title)}</h2>
+      <p>Anexo II del ${esc(R.code(s))} del Formulario Nacional: ${esc(R.what)}.</p>
     </div>
-    <form class="form" data-form="mpRegister" novalidate>
+    <form class="form" data-form="registerPdf" data-kind="${kind}" novalidate>
       ${formMsg()}
-      ${field('Lotes recibidos en', `<select name="period">${options([...years, 'todos'], current, { todos: 'Todos los años' })}</select>`)}
+      ${field(R.label, `<select name="period">${options([...years, 'todos'], current, { todos: 'Todos los años' })}</select>`)}
       <button class="btn block" type="submit">Generar el registro</button>
     </form>
     <div id="sheetOut"></div>`;
 }
 
-// ------------------------------------------------------------------ registro de material de acondicionamiento
-/** Datos del registro (apartado 3.3) que faltan en un material de acondicionamiento. */
+// ------------------------------------------------------------------ material de acondicionamiento: PN/L/PG/006/00
+const FN_PACK_TITLE = 'Recepción y almacenamiento del material\nde acondicionamiento';
+const PACK_DECISION = { aceptado: 'Aceptado', rechazado: 'Rechazado', cuarentena: 'Pendiente (cuarentena)' };
+/** Datos que pide el PN/L/PG/006/00 (apartado 4.2) y faltan en un material. */
 function packagingSheetMissing(p) {
   const miss = [];
   if (!p.internal_no) miss.push('nº de registro interno');
   if (!str(p.supplier)) miss.push('proveedor');
   if ((p.kind || 'primario') === 'primario' && !str(p.lot)) miss.push('nº de lote (acondicionamiento primario)');
   if (!isDay(p.received_date)) miss.push('fecha de recepción');
+  if (!isNum(p.quantity_received) && !isNum(p.quantity)) miss.push('cantidad');
+  if (!p.containers) miss.push('nº de envases (cajas o paquetes)');
   if (!inspectionDone(p.inspection)) miss.push('inspección en la recepción');
-  if (!['aceptado', 'rechazado'].includes(p.status) || !isDay(p.decision_date)) miss.push('decisión de aceptación o rechazo');
+  if (!['aceptado', 'rechazado'].includes(p.status) || !isDay(p.decision_date)) miss.push('decisión final (aceptación o rechazo), fecha y firma');
   return miss;
+}
+/** Celdas del anexo II del PN/L/PG/006/00, en el orden y la proporción del modelo. */
+function packCardRows(p) {
+  const L = (from, to, label) => ({ from, to, label });
+  const V = (from, to, value) => ({ from, to, value });
+  const qty = isNum(p.quantity_received) ? p.quantity_received : p.quantity;
+  const decided = ['aceptado', 'rechazado'].includes(p.status) && isDay(p.decision_date);
+  const ident = `${p.name}${p.capacity ? ` ${p.capacity}` : ''} · acondicionamiento ${lc(PACK_KINDS[p.kind] || 'Primario')}`;
+  return [
+    { h: 27, cells: [L(0, 0.245, 'Número de registro interno'), V(0.245, 1, p.internal_no || '')] },
+    { h: 28, cells: [L(0, 0.245, 'Identificación del producto'), V(0.245, 1, ident)] },
+    { h: 15.5, cells: [L(0, 0.245, 'Proveedor'), V(0.245, 0.561, p.supplier || ''), L(0.561, 0.706, 'Lote'), V(0.706, 1, p.lot || '')] },
+    { h: 39, cells: [L(0, 0.245, 'Fecha de recepción'), V(0.245, 1, isDay(p.received_date) ? fmtDay(p.received_date) : '')] },
+    { h: 17, cells: [L(0, 0.245, 'Cantidad'), V(0.245, 0.444, isNum(qty) ? `${fmtNum(qty)} ${qty === 1 ? 'unidad' : 'unidades'}` : ''), L(0.444, 0.706, 'N.º de envases'), V(0.706, 1, p.containers ? String(p.containers) : '')] },
+    { h: 28, cells: [L(0, 0.245, 'Fecha de caducidad'), V(0.245, 0.444, isDay(p.expiry) ? fmtDay(p.expiry) : ''), L(0.444, 0.706, 'Condiciones de conservación'), V(0.706, 1, p.storage || '')] },
+    { h: 15, cells: [L(0, 0.561, 'Decisión final:'), L(0.561, 0.706, 'Fecha:'), L(0.706, 1, 'Firma:')] },
+    { h: 33, cells: [V(0, 0.561, PACK_DECISION[p.status] || p.status), V(0.561, 0.706, decided ? fmtDay(p.decision_date) : ''), V(0.706, 1, decided ? (p.decision_by || '') : '')] },
+  ];
+}
+/** Observaciones del registro: inspección, revisión anual, eliminación de caducado u obsoleto, devolución, notas y uso. */
+function packObservation(p, used = []) {
+  const parts = [];
+  const insp = p.inspection || {};
+  if (inspectionDone(insp)) parts.push(`Inspección en la recepción correcta (albarán, material y envases)${insp.date ? ` el ${fmtDay(insp.date)}` : ''}${insp.by ? ` por ${insp.by}` : ''}`);
+  else parts.push('Inspección en la recepción no registrada');
+  if (p.status === 'rechazado') {
+    const d = p.disposal;
+    parts.push(d && DISPOSALS[d.method] ? `${DISPOSALS[d.method]} el ${fmtDay(d.date)}${d.detail ? ` (${d.detail})` : ''}${d.by ? ` por ${d.by}` : ''}` : 'Devolución al proveedor pendiente de registrar');
+  }
+  (Array.isArray(p.eliminations) ? p.eliminations : []).forEach((e) => parts.push(`Eliminadas ${fmtNum(e.qty)} uds. por ${PACK_ELIMINATION[e.reason] || e.reason} el ${fmtDay(e.date)}${e.by ? ` (${e.by})` : ''}`));
+  const r = lastReview(p);
+  if (r) parts.push(`Revisión anual: ${fmtDay(r.date)} (${r.by})`);
+  if (str(p.observations)) parts.push(p.observations);
+  if (used.length) parts.push(`Utilizado en: ${used.slice(0, 12).map((u) => `${u.lot} (${fmtNum(u.qty)} uds.)`).join(', ')}${used.length > 12 ? ` y ${used.length - 12} más` : ''}`);
+  return parts.join('. ').replace(/\.\./g, '.');
+}
+/** Elaboraciones que han usado un material, por fecha. */
+async function packUsage() {
+  const out = new Map();
+  (await getAll('production'))
+    .sort((a, b) => String(a.elaborated_date || a.created_at).localeCompare(String(b.elaborated_date || b.created_at)))
+    .forEach((x) => (x.packaging_used || []).forEach((u) => {
+      if (!u.packaging_uuid) return;
+      if (!out.has(u.packaging_uuid)) out.set(u.packaging_uuid, []);
+      out.get(u.packaging_uuid).push({ lot: x.lot || x.record_code, qty: u.qty });
+    }));
+  return out;
 }
 
 async function viewPackagingSheet(id) {
@@ -818,74 +878,39 @@ async function viewPackagingSheet(id) {
   if (!p) return empty('Este material no existe.', '');
   state.parent = `#envases--${p.uuid}`;
   state.label = null;
+  const s = await loadSettings();
   const missing = packagingSheetMissing(p);
   return `<div class="panel">
       <div class="head-row"><h2 class="big">${esc(p.name)}</h2>${pill('packaging', p.status)}</div>
       <p>${p.internal_no ? `${esc(p.internal_no)} · ` : ''}${esc(PACK_KINDS[p.kind] || 'Primario')}${p.lot ? ` · Lote ${esc(p.lot)}` : ''}${p.supplier ? ` · ${esc(p.supplier)}` : ''}</p>
+      <p class="hint">Formato del ${esc(s.fn.pack_code)} del Formulario Nacional: anexo II, registro de material de acondicionamiento.</p>
     </div>
     ${missing.length
-      ? `<div class="msg warn"><strong>Faltan datos:</strong> ${esc(missing.join(', '))}. Se puede generar como borrador; para el registro definitivo, complétalos en <a href="#envases--${esc(p.uuid)}--editar">Editar ficha</a>.</div>`
+      ? `<div class="msg warn"><strong>Faltan datos:</strong> ${esc(missing.join('; '))}. Se puede generar como borrador; para el definitivo, complétalos en <a href="#envases--${esc(p.uuid)}--editar">Editar ficha</a>.</div>`
       : '<p class="msg ok">El registro del material está completo.</p>'}
     <form class="form" data-form="packagingSheet" data-id="${esc(p.uuid)}" novalidate>
       ${formMsg()}
       <button class="btn block" type="submit">${missing.length ? 'Generar borrador del registro' : 'Generar registro'}</button>
     </form>
+    <p class="more"><a href="#registroac">Registro de todo el material (anexo II)</a></p>
     <div id="sheetOut"></div>`;
 }
-
-/** Registro de material de acondicionamiento: identificación, recepción e inspección, uso, observaciones y decisión. */
-async function buildPackagingSheetPdf(p, s, used, docs, draftMissing) {
-  const sh = await createSheet({
-    title: 'Registro de material de acondicionamiento', subtitle: 'Recepción, inspección y decisión de aceptación', tag: 'RD 175/2001 · Apartado 3.3',
-    running: `Registro de material de acondicionamiento · ${p.name}${p.lot ? ` · lote ${p.lot}` : ''}`,
-    footer: `FARMA·LAB · ${p.internal_no || p.name}`, pharmacy: s.pharmacy, draftMissing,
-  });
-  const { mm, C } = sh;
-  const primary = (p.kind || 'primario') === 'primario';
-  const qty = isNum(p.quantity_received) ? p.quantity_received : p.quantity;
-  sh.grid([
-    { label: 'Número de registro interno', value: p.internal_no || '—', big: true, span: 2 },
-    { label: 'Estado', value: STATUS.packaging[p.status] || p.status },
-    { label: 'Identificación del producto', value: `${p.name}${p.capacity ? `, ${p.capacity}` : ''}`, strong: true, span: 2 },
-    { label: 'Acondicionamiento', value: PACK_KINDS[p.kind] || 'Primario' },
-    { label: 'Proveedor', value: p.supplier || '—' },
-    { label: 'Lote', value: p.lot || (primary ? '—' : 'No procede') },
-    { label: 'Fecha de recepción', value: fmtDay(p.received_date) },
-    { label: 'Cantidad', value: isNum(qty) ? `${fmtNum(qty)} unidades` : '—' },
-    { label: 'Nº de envases', value: p.containers ? `${p.containers} ${p.containers === 1 ? 'caja o paquete' : 'cajas o paquetes'}` : '—' },
-    { label: 'Fecha de caducidad', value: isDay(p.expiry) ? fmtDay(p.expiry) : 'No procede' },
-    { label: 'Condiciones de conservación', value: p.storage || 'No procede', span: 3 },
-  ], 3, { bg: C.band, pad: mm(4) });
-
-  const insp = p.inspection || {};
-  sh.section('Inspección en la recepción', mm(22));
-  sh.table([{ title: 'Comprobación', w: 0.78 }, { title: 'Resultado', w: 0.22 }],
-    Object.entries(PACK_CHECKS).map(([k, label]) => [label, insp[k] ? 'Correcto' : 'Sin comprobar']));
-  sh.gap(mm(2));
-  sh.grid([
-    { label: 'Realizada por', value: insp.by || '—' },
-    { label: 'Fecha', value: isDay(insp.date) ? fmtDay(insp.date) : '—' },
-    { label: 'Documentación archivada', value: docs.length ? docs.join(', ') : '—' },
-  ], 3);
-
-  if (used.length) {
-    sh.section('Utilizado en', mm(20));
-    sh.table([{ title: 'Lote de la fórmula', w: 0.26 }, { title: 'Fórmula', w: 0.46 }, { title: 'Elaboración', w: 0.14 }, { title: 'Unidades', w: 0.14, right: true }], used);
-  }
-
-  sh.section('Observaciones');
-  sh.paragraph(p.observations || '—', { color: p.observations ? C.ink : C.muted });
-
-  const decided = ['aceptado', 'rechazado'].includes(p.status) && isDay(p.decision_date);
-  sh.signature({
-    decision: decided ? `Decisión final: ${STATUS.packaging[p.status].toLocaleLowerCase('es')} el ${fmtDay(p.decision_date)} por ${p.decision_by || '—'}` : 'En cuarentena: pendiente de decisión',
-    rejected: p.status === 'rechazado',
-    signer: [p.decision_by || s.pharmacy.pharmacist, decided && `Fecha: ${fmtDay(p.decision_date)}`].filter(Boolean).join(' · '),
-  });
+async function packSheet(s, draftMissing, subject) {
+  return createFnSheet({ code: s.fn.pack_code, related: s.fn.pack_related, procTitle: FN_PACK_TITLE, pharmacy: s.pharmacy, subject, draftMissing });
+}
+/** Anexo II del PN/L/PG/006/00 de un material. */
+async function buildPackagingSheetPdf(p, s, used, draftMissing) {
+  const sh = await packSheet(s, draftMissing, `Registro de material de acondicionamiento · ${p.name}${p.lot ? ` · lote ${p.lot}` : ''}`);
+  drawRegisterCards(sh, [p], { annex: 'ANEXO II', title: 'Registro de material de acondicionamiento', rowsOf: packCardRows, obsOf: (x) => packObservation(x, used) });
+  return sh.finish();
+}
+async function buildPackRegisterPdf(list, s, period) {
+  const sh = await packSheet(s, [], `Registro de material de acondicionamiento · ${period}`);
+  const usage = await packUsage();
+  drawRegisterCards(sh, list, { annex: 'ANEXO II', title: 'Registro de material de acondicionamiento', rowsOf: packCardRows, obsOf: (x) => packObservation(x, usage.get(x.uuid) || []) });
   return sh.finish();
 }
 
-/** Muestra el PDF generado con los botones de descarga y la vista previa. */
 async function showSheet(blob, name, heading) {
   state.label = { blob, name };
   const canShare = navigator.canShare && navigator.canShare({ files: [new File([blob], name, { type: 'application/pdf' })] });
@@ -904,12 +929,7 @@ Object.assign(FORMS, {
     if (!p) throw new InputError('Este material ya no existe.');
     const s = await loadSettings();
     const missing = packagingSheetMissing(p);
-    const used = (await getAll('production'))
-      .flatMap((x) => (x.packaging_used || []).filter((u) => u.packaging_uuid === p.uuid).map((u) => [x.lot || x.record_code, x.formula_name, fmtDay(x.elaborated_date), fmtNum(u.qty), x.elaborated_date || '']))
-      .sort((a, b) => String(a[4]).localeCompare(String(b[4])))
-      .map((r) => r.slice(0, 4));
-    const docs = (await docsOf(p.uuid)).map((f) => f.name);
-    const blob = await buildPackagingSheetPdf(p, s, used, docs, missing);
+    const blob = await buildPackagingSheetPdf(p, s, (await packUsage()).get(p.uuid) || [], missing);
     const slug = String(p.internal_no || p.lot || p.name).replace(/[^A-Za-z0-9._-]+/g, '-').slice(0, 60);
     await logOnly('ficha_env_generada', `${p.name}${p.lot ? ` / ${p.lot}` : ''}${missing.length ? ' (borrador)' : ''}`);
     await showSheet(blob, `registro-acondicionamiento-${slug}.pdf`, missing.length ? 'Borrador listo' : 'Registro listo');
@@ -927,17 +947,20 @@ Object.assign(FORMS, {
     await showSheet(blob, `registro-mp-${slug}.pdf`, missing.length ? 'Borrador listo' : 'Registro listo');
   },
 
-  async mpRegister(form) {
+  async registerPdf(form) {
+    const kind = form.dataset.kind;
+    const R = REGISTERS[kind];
+    if (!R) return;
     const period = form.elements.period.value;
     const s = await loadSettings();
-    const lots = (await getAll('material'))
+    const items = (await getAll(R.store))
       .filter((m) => period === 'todos' || String(m.received_date || m.created_at || '').startsWith(period))
       .sort((a, b) => String(a.received_date || a.created_at).localeCompare(String(b.received_date || b.created_at)) || String(a.internal_no || '').localeCompare(String(b.internal_no || ''), 'es', { numeric: true }));
-    if (!lots.length) throw new InputError('No hay lotes recibidos en ese periodo.');
+    if (!items.length) throw new InputError(kind === 'mp' ? 'No hay lotes recibidos en ese periodo.' : 'No hay material recibido en ese periodo.');
     const label = period === 'todos' ? 'todos los años' : period;
-    const blob = await buildMpRegisterPdf(lots, s, label);
-    await logOnly('registro_mp_generado', `${label}: ${lots.length} ${lots.length === 1 ? 'lote' : 'lotes'}`);
-    await showSheet(blob, `registro-materias-primas-${period}.pdf`, 'Registro listo');
+    const blob = kind === 'mp' ? await buildMpRegisterPdf(items, s, label) : await buildPackRegisterPdf(items, s, label);
+    await logOnly(kind === 'mp' ? 'registro_mp_generado' : 'registro_ac_generado', `${label}: ${items.length} ${kind === 'mp' ? (items.length === 1 ? 'lote' : 'lotes') : (items.length === 1 ? 'material' : 'materiales')}`);
+    await showSheet(blob, `${kind === 'mp' ? 'registro-materias-primas' : 'registro-acondicionamiento'}-${period}.pdf`, 'Registro listo');
   },
 
   async recordSheet(form) {

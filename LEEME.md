@@ -1,4 +1,4 @@
-# FARMA·LAB móvil v0.3.15 (prototipo)
+# FARMA·LAB móvil v0.3.16 (prototipo)
 
 App que se instala desde Chrome o Edge (Android y Windows) y funciona sin conexión. Los datos se guardan **en el propio dispositivo** y, si se configura, se sincronizan entre el móvil y el PC a través de Google Drive.
 
@@ -6,13 +6,22 @@ App que se instala desde Chrome o Edge (Android y Windows) y funciona sin conexi
 - **Almacén.** Materias primas con número de control interno, proveedor, lote, boletín de análisis y ficha de seguridad adjuntos, detección de excipientes de declaración obligatoria y cambio de estado (cuarentena, aceptado, rechazado, bloqueado). Material de acondicionamiento (envases) con su ficha y su stock.
 - **Fórmulas.** Varios componentes, códigos nacionales por presentación o concentración, PNT vinculados y estados borrador, aprobada y obsoleta.
 - **Elaborar.** Guía de elaboración (RD 175/2001): pesadas con lote, envases usados, utillaje, control de calidad y decisión del farmacéutico. Estados en proceso, elaborada y dispensada. Lote `[Año]-J-[Mes]-FM-[Número]` consecutivo, que nunca se reinicia. Número de libro recetario al dispensar.
-- **Registros del RD 175/2001 en PDF A4**, listos para imprimir y firmar: registro y especificaciones de materias primas (anexos II y III del PN/L/PG/005/00 del Formulario Nacional), registro de material de acondicionamiento (apartado 3.3) y ficha 2 (registro de formulación magistral).
+- **Registros del RD 175/2001 en PDF A4**, listos para imprimir y firmar: registro y especificaciones de materias primas (anexos II y III del PN/L/PG/005/00 del Formulario Nacional), registro de material de acondicionamiento (anexo II del PN/L/PG/006/00) y ficha 2 (registro de formulación magistral).
 - **Etiquetas en PDF** en folio A4 (8 o 2 por folio). Paciente, prescriptor y nº de colegiado se escriben solo al imprimir y no se guardan.
 - **Avisos en la app**: stock bajo, envases por reponer, caducidades, cuarentena, elaboraciones paradas más de 2 días y datos que faltan.
 - **Calculadora**: cantidad a pesar (% m/m, m/v, v/v, mg/g, mg/ml, ppm, 1:X, mg por unidad) con riqueza, factor sal/base y densidad; conversión de unidades y diluciones.
 - **Precio de las fórmulas financiadas** (Comunidad de Madrid), ver abajo.
 - **Documentos**: PNT y bibliografía con su PDF, Word o foto, que se consultan dentro de la app, también sin conexión.
 - Registro de actividad, bloqueo con PIN, exportar e importar copias.
+
+## Novedades de la v0.3.16
+- **Material de acondicionamiento según el PN/L/PG/006/00 del Formulario Nacional** («Recepción y almacenamiento del material de acondicionamiento»).
+  - El PDF reproduce el anexo II «Registro de material de acondicionamiento»: cabecera azul con título, código y página; ficha con nº de registro interno, identificación del producto, proveedor, lote, fecha de recepción, cantidad, nº de envases, caducidad, condiciones de conservación, decisión final, fecha y firma; y «Observaciones» debajo (inspección, devolución, eliminaciones, revisión y fórmulas donde se ha usado).
+  - Al dar de alta un envase se le asigna el nº de registro interno siguiente (AC-0001, AC-0002…) si no se escribe otro.
+  - Revisión anual del estado (4.3), con aviso en Inicio cuando pasa un año, igual que las materias primas.
+  - Eliminación del material caducado, obsoleto o deteriorado: se registra y se descuenta del stock.
+  - Un envase rechazado pide registrar su destino (devolución o eliminación).
+  - Registro de todos los envases de un año en PDF (Almacén → Envases). El código del PNT se cambia en Ajustes.
 
 ## Novedades de la v0.3.15
 - El registro de materias primas (anexo II) y las especificaciones (anexo III) reproducen el diseño del PN/L/PG/005/00 de la 3.ª edición del Formulario Nacional: cabecera azul con el título, el código y la página; «ANEXO» en rojo; ficha de registro por lote con las celdas del modelo (registro interno, nombre del producto, proveedor, lote, control de calidad, fecha de recepción, cantidad, número de envases, decisión final, fecha y firma) y «Observaciones» debajo; y la rejilla de especificaciones del anexo III. El registro anual pone una ficha por lote.
