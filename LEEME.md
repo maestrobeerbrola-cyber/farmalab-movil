@@ -1,4 +1,4 @@
-# FARMA·LAB móvil v0.3.23 (prototipo)
+# FARMA·LAB móvil v0.3.24 (prototipo)
 
 App que se instala desde Chrome o Edge (Android y Windows) y funciona sin conexión. Los datos se guardan **en el propio dispositivo** y, si se configura, se sincronizan entre el móvil y el PC a través de Google Drive.
 
@@ -14,6 +14,9 @@ App que se instala desde Chrome o Edge (Android y Windows) y funciona sin conexi
 - **Temperaturas** (PN/L/PG/009/00): lectura diaria del local y la nevera, incidencias y registro mensual en PDF.
 - **Documentos**: PNT y bibliografía con su PDF, Word o foto, que se consultan dentro de la app, también sin conexión.
 - Registro de actividad, bloqueo con PIN, exportar e importar copias.
+
+## Novedades de la v0.3.24
+- **Visor de documentos con zoom propio**: al ampliar un PNT, una ficha, un registro, una etiqueta o un documento subido, solo se amplía el documento dentro de su marco; la barra de arriba y la de abajo se quedan fijas. En el móvil: pellizcar o tocar dos veces (al ampliar aparecen los botones − / % / + para volver al 100 %). En el PC: botones − y +, Ctrl + rueda del ratón o doble clic. Al ampliar, la página a la vista se vuelve a pintar con más resolución para que se lea nítida; los Word se agrandan reorganizando el texto.
 
 ## Novedades de la v0.3.23
 - **El archivo también para el material de acondicionamiento** (Almacén → Acondicionamiento → «Terminados, caducados y rechazados»): «Marcar como terminado», paso automático al archivo al caducar, con registro de la eliminación de las unidades que queden, y «Devolver a la lista» si hay un error. Los envases archivados ya no se proponen en la guía de elaboración ni en las etiquetas de estado.

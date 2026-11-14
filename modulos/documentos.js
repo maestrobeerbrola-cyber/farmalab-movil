@@ -165,6 +165,126 @@ async function renderDocument(container) {
   }
 }
 
+// ------------------------------------------------------------------ visor con zoom propio
+/*
+ * Al pellizcar solo se amplía el documento, dentro de su marco: la barra de arriba y la de abajo no se mueven
+ * (el zoom del navegador ampliaba la pantalla entera). El marco es un contenedor de scroll; ampliar ensancha
+ * el contenido (PDF e imágenes) o lo agranda reorganizando el texto (Word). Gestos: pellizcar, doble toque,
+ * doble clic, Ctrl + rueda (o pellizco en el panel táctil) y botones − / + .
+ */
+const DOC_ZOOM_MIN = 1;
+const DOC_ZOOM_MAX = 4;
+const coarsePointer = () => window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+const zoomHint = () => (coarsePointer() ? 'Pellizca o toca dos veces para ampliar.' : 'Amplía con los botones − y +, con Ctrl + rueda del ratón o con doble clic.');
+function docFrame(container, hint, mode = 'width', onZoom = null) {
+  container.innerHTML = `<p class="hint pages">${esc(hint)}</p>
+    <div class="doc-frame" tabindex="0" aria-label="Documento"><div class="doc-zoom"></div></div>
+    <div class="zoom-ctl" role="group" aria-label="Ampliación">
+      <button type="button" class="zoom-btn" data-zoom="out" aria-label="Reducir">−</button>
+      <button type="button" class="zoom-btn zoom-level" data-zoom="fit" aria-label="Volver al tamaño de la pantalla">100 %</button>
+      <button type="button" class="zoom-btn" data-zoom="in" aria-label="Ampliar">+</button>
+    </div>`;
+  const frame = container.querySelector('.doc-frame');
+  const inner = container.querySelector('.doc-zoom');
+  attachDocZoom(container, frame, inner, mode, onZoom);
+  return { frame, inner };
+}
+function attachDocZoom(box, frame, inner, mode, onZoom) {
+  let z = 1;
+  let settle = 0;
+  let lastTouchZoom = 0;
+  const level = box.querySelector('.zoom-level');
+  const pt = (e) => { const r = frame.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
+  /** Cambia la ampliación manteniendo quieto el punto (fx, fy) del marco. */
+  const set = (nz, fx = frame.clientWidth / 2, fy = frame.clientHeight / 2) => {
+    nz = Math.min(DOC_ZOOM_MAX, Math.max(DOC_ZOOM_MIN, nz));
+    if (Math.abs(nz - z) < 0.001) return;
+    const cx = (frame.scrollLeft + fx) / z;
+    const cy = (frame.scrollTop + fy) / z;
+    z = nz;
+    inner.style.setProperty('--z', String(z));
+    if (mode === 'reflow') inner.style.zoom = String(z);
+    else inner.style.width = `${z * 100}%`;
+    frame.scrollLeft = cx * z - fx;
+    frame.scrollTop = cy * z - fy;
+    box.classList.toggle('zoomed', z > 1.001);
+    level.textContent = `${Math.round(z * 100)} %`;
+    if (onZoom) { clearTimeout(settle); settle = setTimeout(() => onZoom(z), 280); }
+  };
+  if (onZoom) frame.addEventListener('scroll', () => { if (z > 1.001) { clearTimeout(settle); settle = setTimeout(() => onZoom(z), 280); } }, { passive: true });
+  // Pantalla táctil: pellizco (con desplazamiento) y doble toque.
+  let pinch = null;
+  let tap = null;
+  let lastTap = null;
+  frame.addEventListener('touchstart', (e) => {
+    if (e.touches.length === 2) {
+      const a = pt(e.touches[0]);
+      const b = pt(e.touches[1]);
+      pinch = { d: Math.hypot(a.x - b.x, a.y - b.y) || 1, z, x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+      tap = null;
+    } else if (e.touches.length === 1) {
+      tap = { ...pt(e.touches[0]), t: Date.now() };
+    } else tap = null;
+  }, { passive: true });
+  frame.addEventListener('touchmove', (e) => {
+    if (tap && e.touches.length === 1) {
+      const p = pt(e.touches[0]);
+      if (Math.hypot(p.x - tap.x, p.y - tap.y) > 10) tap = null;
+    }
+    if (!pinch || e.touches.length !== 2) return;
+    if (e.cancelable) e.preventDefault();
+    const a = pt(e.touches[0]);
+    const b = pt(e.touches[1]);
+    const x = (a.x + b.x) / 2;
+    const y = (a.y + b.y) / 2;
+    frame.scrollLeft -= x - pinch.x;
+    frame.scrollTop -= y - pinch.y;
+    pinch.x = x; pinch.y = y;
+    set(pinch.z * (Math.hypot(a.x - b.x, a.y - b.y) / pinch.d), x, y);
+    lastTouchZoom = Date.now();
+  }, { passive: false });
+  frame.addEventListener('touchend', (e) => {
+    if (e.touches.length < 2) pinch = null;
+    if (!tap || e.touches.length) return;
+    const now = Date.now();
+    if (now - tap.t < 300) {
+      if (lastTap && now - lastTap.t < 350 && Math.hypot(tap.x - lastTap.x, tap.y - lastTap.y) < 30) {
+        set(z > 1.05 ? 1 : 2, tap.x, tap.y);
+        lastTap = null;
+        lastTouchZoom = now;
+      } else lastTap = { ...tap, t: now };
+    }
+    tap = null;
+  });
+  frame.addEventListener('touchcancel', () => { pinch = null; tap = null; });
+  frame.addEventListener('gesturestart', (e) => e.preventDefault());   // Safari: sin zoom de la página
+  // Ratón y panel táctil.
+  frame.addEventListener('dblclick', (e) => {
+    if (Date.now() - lastTouchZoom < 600) return;   // ya lo ha hecho el doble toque
+    const p = pt(e);
+    set(z > 1.05 ? 1 : 2, p.x, p.y);
+  });
+  frame.addEventListener('wheel', (e) => {
+    if (!e.ctrlKey) return;
+    e.preventDefault();
+    const p = pt(e);
+    set(z * Math.exp(-e.deltaY * 0.0025), p.x, p.y);
+  }, { passive: false });
+  frame.addEventListener('keydown', (e) => {
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.key === '+' || e.key === '=') set(z * 1.25);
+    else if (e.key === '-') set(z / 1.25);
+    else if (e.key === '0') set(1);
+    else return;
+    e.preventDefault();
+  });
+  box.querySelector('.zoom-ctl').addEventListener('click', (e) => {
+    const b = e.target.closest('[data-zoom]');
+    if (!b) return;
+    set(b.dataset.zoom === 'in' ? z * 1.25 : b.dataset.zoom === 'out' ? z / 1.25 : 1);
+  });
+}
+
 const vendorUrl = (path) => new URL(`vendor/${path}`, document.baseURI).href;
 let pdfjsPromise = null;
 function loadPdfJs() {
@@ -189,9 +309,13 @@ async function renderPdf(container, doc) {
   });
   const pdf = await task.promise;
   if (!container.isConnected) { task.destroy().catch(() => {}); return; }   // se salió de la pantalla mientras cargaba
-  container.innerHTML = `<p class="hint pages">${pdf.numPages} ${pdf.numPages === 1 ? 'página' : 'páginas'}. Pellizca para ampliar.</p>`;
-  const width = container.clientWidth || 360;
+  let zoomNow = 1;
+  const { frame, inner } = docFrame(container, `${pdf.numPages} ${pdf.numPages === 1 ? 'página' : 'páginas'}. ${zoomHint()}`, 'width', (z) => { zoomNow = z; sharpen().catch((err) => console.error(err)); });
+  const width = frame.clientWidth || 360;
   const dpr = Math.min(window.devicePixelRatio || 1, 3);
+  const MAX_BASE = 6e6;     // píxeles de la imagen normal de cada página
+  const MAX_SHARP = 10e6;   // y de la nítida al ampliar
+  const MAX_SHARP_PAGES = 3;
   const slots = [];
   for (let n = 1; n <= pdf.numPages; n += 1) {
     const page = await pdf.getPage(n);
@@ -201,31 +325,73 @@ async function renderPdf(container, doc) {
     slot.style.aspectRatio = `${base.width} / ${base.height}`;
     slot.dataset.page = String(n);
     slot.setAttribute('aria-label', `Página ${n}`);
-    container.append(slot);
-    slots.push({ slot, page, base });
+    inner.append(slot);
+    slots.push({ slot, page, base, scale: 0, baseUrl: '', sharpUrl: '', busy: false });
   }
-  // Cada página se pinta al acercarse a la pantalla y se guarda como imagen: así no se agota la memoria del móvil.
-  const paint = async ({ slot, page, base }) => {
-    if (slot.dataset.done) return;
-    slot.dataset.done = '1';
-    let scale = (width / base.width) * dpr * 1.5;
-    const maxPixels = 6e6;
-    if (base.width * base.height * scale * scale > maxPixels) scale = Math.sqrt(maxPixels / (base.width * base.height));
-    const viewport = page.getViewport({ scale });
+  const capScale = (base, scale, max) => Math.min(scale, Math.sqrt(max / (base.width * base.height)));
+  const renderUrl = async (item, scale) => {
+    const viewport = item.page.getViewport({ scale });
     const canvas = document.createElement('canvas');
     canvas.width = Math.floor(viewport.width);
     canvas.height = Math.floor(viewport.height);
-    const ctx = canvas.getContext('2d');
-    await page.render({ canvasContext: ctx, canvas, viewport }).promise;
+    await item.page.render({ canvasContext: canvas.getContext('2d'), canvas, viewport }).promise;
     const blob = await new Promise((res) => canvas.toBlob(res, 'image/png'));
     canvas.width = 0; canvas.height = 0;
-    if (!slot.isConnected || !blob) return;
+    if (!blob || !item.slot.isConnected) return '';
     const url = URL.createObjectURL(blob);
     state.objectUrls.push(url);
-    const img = document.createElement('img');
+    return url;
+  };
+  const show = (item, url) => {
+    let img = item.slot.querySelector('img');
+    if (!img) {
+      img = document.createElement('img');
+      img.alt = `Página ${item.slot.dataset.page}`;
+      item.slot.append(img);
+    }
     img.src = url;
-    img.alt = `Página ${slot.dataset.page}`;
-    slot.append(img);
+  };
+  const dropSharp = (item) => {
+    if (!item.sharpUrl) return;
+    if (item.baseUrl) show(item, item.baseUrl);
+    URL.revokeObjectURL(item.sharpUrl);
+    item.sharpUrl = '';
+    item.scale = capScale(item.base, (width / item.base.width) * dpr * 1.5, MAX_BASE);
+  };
+  // Cada página se pinta al acercarse a la pantalla y se guarda como imagen: así no se agota la memoria del móvil.
+  const paint = async (item) => {
+    if (item.slot.dataset.done) return;
+    item.slot.dataset.done = '1';
+    const scale = capScale(item.base, (width / item.base.width) * dpr * 1.5, MAX_BASE);
+    const url = await renderUrl(item, scale);
+    if (!url) return;
+    item.baseUrl = url;
+    if (!item.sharpUrl) { item.scale = scale; show(item, url); }
+  };
+  // Al ampliar, las páginas a la vista se vuelven a pintar con más resolución (como mucho tres a la vez).
+  const sharpQueue = [];
+  const sharpen = async () => {
+    if (!container.isConnected) return;
+    if (zoomNow <= 1.4) { slots.forEach(dropSharp); sharpQueue.length = 0; return; }
+    const fr = frame.getBoundingClientRect();
+    for (const item of slots) {
+      const r = item.slot.getBoundingClientRect();
+      if (r.bottom < fr.top || r.top > fr.bottom || item.busy || !item.baseUrl) continue;
+      const scale = capScale(item.base, (width * zoomNow / item.base.width) * dpr, MAX_SHARP);
+      if (scale <= item.scale * 1.15) continue;
+      item.busy = true;
+      try {
+        const url = await renderUrl(item, scale);
+        if (!url) continue;
+        if (item.sharpUrl) URL.revokeObjectURL(item.sharpUrl);
+        item.sharpUrl = url; item.scale = scale;
+        show(item, url);
+        const i = sharpQueue.indexOf(item);
+        if (i >= 0) sharpQueue.splice(i, 1);
+        sharpQueue.push(item);
+        while (sharpQueue.length > MAX_SHARP_PAGES) dropSharp(sharpQueue.shift());
+      } finally { item.busy = false; }
+    }
   };
   const observer = new IntersectionObserver((entries) => {
     entries.forEach((e) => {
@@ -234,19 +400,19 @@ async function renderPdf(container, doc) {
       const item = slots.find((x) => x.slot === e.target);
       if (item) paint(item).catch((err) => console.error(err));
     });
-  }, { rootMargin: '800px 0px' });
+  }, { root: frame, rootMargin: '800px 0px' });
   slots.forEach(({ slot }) => observer.observe(slot));
 }
 
 function renderImage(container, doc) {
   const url = URL.createObjectURL(doc.blob);
   state.objectUrls.push(url);
-  container.innerHTML = '<p class="hint pages">Pellizca para ampliar.</p>';
+  const { inner } = docFrame(container, zoomHint());
   const img = document.createElement('img');
   img.className = 'doc-image';
   img.src = url;
   img.alt = DOC_KINDS[doc.kind] || 'Imagen';
-  container.append(img);
+  inner.append(img);
 }
 
 let mammothPromise = null;
@@ -271,8 +437,8 @@ async function renderDocx(container, doc) {
   const article = document.createElement('article');
   article.className = 'docx';
   article.append(sanitizeDocHtml(result.value));
-  container.innerHTML = '<p class="hint pages">Vista de lectura: se muestra el texto, las tablas y las imágenes; el diseño de página puede diferir del original.</p>';
-  container.append(article);
+  const { inner } = docFrame(container, `Vista de lectura: se muestra el texto, las tablas y las imágenes; el diseño de página puede diferir del original. ${zoomHint()}`, 'reflow');
+  inner.append(article);
 }
 
 /** Deja solo etiquetas de texto seguras del HTML generado a partir del Word. */

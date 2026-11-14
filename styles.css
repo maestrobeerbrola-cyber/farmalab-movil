@@ -277,8 +277,25 @@ input[type="text"].display-input:focus { outline: none; border: 0; }
 .doc-head { display: grid; gap: 6px; margin-bottom: 14px; }
 .doc-head strong { font-size: 18px; overflow-wrap: anywhere; }
 .doc-head .actions { margin-top: 6px; }
-.docview { display: grid; gap: 12px; }
+.docview { position: relative; display: grid; gap: 12px; touch-action: pan-x pan-y; }   /* sin zoom de la página: el documento tiene el suyo */
 .docview .pages { margin: 0 4px; }
+.doc-frame {
+  max-height: calc(100vh - var(--top-h) - var(--tab-h) - 40px);
+  max-height: calc(100dvh - var(--top-h) - var(--tab-h) - env(safe-area-inset-top) - env(safe-area-inset-bottom) - 40px);
+  overflow: auto; touch-action: pan-x pan-y; border-radius: 6px;
+}
+.doc-frame:focus-visible { outline: 2px solid var(--green); outline-offset: 2px; }
+.doc-zoom { display: grid; gap: calc(12px * var(--z, 1)); width: 100%; }
+.zoom-ctl {
+  position: absolute; right: 10px; bottom: 10px; z-index: 2;
+  display: flex; align-items: center;
+  background: rgba(255, 255, 255, .94); border: 1px solid var(--line); border-radius: 22px;
+  box-shadow: 0 2px 8px rgba(20, 40, 60, .18);
+}
+.zoom-btn { min-width: 44px; height: 44px; padding: 0 6px; border: 0; background: transparent; color: var(--ink); font: inherit; font-size: 22px; line-height: 1; cursor: pointer; border-radius: 22px; }
+.zoom-btn:active { background: var(--gray-bg); }
+.zoom-btn.zoom-level { min-width: 64px; font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
+@media (pointer: coarse) { .docview:not(.zoomed) .zoom-ctl { display: none; } }   /* en el móvil se pellizca; los botones salen al ampliar, para volver al 100 % */
 .pdf-page { width: 100%; background: #fff; border: 1px solid var(--line); border-radius: 4px; box-shadow: 0 1px 3px rgba(20, 40, 60, .12); overflow: hidden; }
 .pdf-page img { display: block; width: 100%; height: auto; }
 .docx { padding: 20px 18px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); font-size: 16px; line-height: 1.55; overflow-wrap: anywhere; }
@@ -465,6 +482,7 @@ details.more-reading summary { cursor: pointer; color: var(--green-ink); font-we
 p:has(> .btn.block) + p:has(> .btn.block) { margin-top: 10px; }
 .temp-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap: 0 16px; }
 @media (min-width: 1000px) {
+  .doc-frame { max-height: calc(100dvh - var(--top-h) - 48px); }   /* las pestañas van a la izquierda */
   :root { --side-w: 232px; --content-w: 1160px; }
   .tabbar {
     top: var(--top-h); bottom: 0; right: auto; width: var(--side-w); height: auto;
