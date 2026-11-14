@@ -17,17 +17,46 @@ async function sniffDoc(file) {
   if (starts([0x52, 0x49, 0x46, 0x46]) && new TextDecoder('latin1').decode(head.slice(8, 12)) === 'WEBP') return 'webp';
   return null;
 }
-/** Prepara el registro de un documento adjunto a una ficha (PNT, materia prima, envase o bibliografía). */
-async function buildDocRecord(file, ownerType, ownerUuid, existing, { version = '', kind = 'documento' } = {}) {
+const PHOTO_MAX_SIDE = 2400;     // px por el lado largo: un folio fotografiado se sigue leyendo bien
+const PHOTO_QUALITY = 0.88;
+const PHOTO_MAX_INPUT = 60 * 1048576;
+/**
+ * Las fotos se guardan como JPG de hasta 2400 px por el lado largo: ocupan mucho menos (copias y sincronización),
+ * se ven derechas aunque el móvil las guarde giradas y pierden la ubicación (GPS) y el resto de metadatos.
+ */
+async function normalizePhoto(file) {
+  let bmp;
+  try { bmp = await createImageBitmap(file, { imageOrientation: 'from-image' }); } catch { return null; }
+  const scale = Math.min(1, PHOTO_MAX_SIDE / Math.max(bmp.width, bmp.height));
+  const w = Math.max(1, Math.round(bmp.width * scale));
+  const h = Math.max(1, Math.round(bmp.height * scale));
+  const canvas = document.createElement('canvas');
+  canvas.width = w; canvas.height = h;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#fff';   // las imágenes con transparencia quedan sobre blanco
+  ctx.fillRect(0, 0, w, h);
+  ctx.drawImage(bmp, 0, 0, w, h);
+  if (bmp.close) bmp.close();
+  const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/jpeg', PHOTO_QUALITY));
+  canvas.width = 0; canvas.height = 0;
+  if (!blob) return null;
+  return new File([blob], `${file.name.replace(/\.[^.]*$/, '') || 'foto'}.jpg`, { type: 'image/jpeg' });
+}
+const FILE_TYPES_TEXT = 'PDF, Word (.docx o .doc) o foto (JPG, PNG o WebP)';
+/** Prepara el registro de un documento adjunto: PNT, materia prima, envase, bibliografía o receta. */
+async function buildDocRecord(input, ownerType, ownerUuid, existing, { version = '', kind = 'documento' } = {}) {
+  let file = input;
   if (!file.size) throw new InputError('El archivo está vacío.');
-  if (file.size > MAX_DOC_BYTES) throw new InputError(`El archivo ocupa ${fmtSize(file.size)}. El máximo es 25 MB.`);
-  const ext = await sniffDoc(file);
-  const images = kind === 'receta';
-  if (!ext || (DOC_TYPES[ext].image && !images)) {
-    throw new InputError(images
-      ? 'Solo se admiten PDF, Word (.docx o .doc) o fotos JPG, PNG o WebP. Si la foto es HEIC (iPhone), guárdala como JPG.'
-      : 'Solo se admiten documentos PDF (.pdf) o Word (.docx o .doc).');
+  let ext = await sniffDoc(file);
+  if (!ext) throw new InputError(`Solo se admiten documentos ${FILE_TYPES_TEXT}. Si la foto es HEIC (iPhone), guárdala como JPG.`);
+  if (DOC_TYPES[ext].image) {
+    if (file.size > PHOTO_MAX_INPUT) throw new InputError(`La foto ocupa ${fmtSize(file.size)}: es demasiado grande para leerla.`);
+    file = await normalizePhoto(file);
+    if (!file) throw new InputError('No se ha podido leer la foto. Prueba a hacerla de nuevo o a guardarla como JPG.');
+    ext = 'jpg';
   }
+  if (file.size > MAX_DOC_BYTES) throw new InputError(`El archivo ocupa ${fmtSize(file.size)}. El máximo es 25 MB.`);
+  const local = kind === 'receta';   // las recetas llevan datos del paciente: solo en este dispositivo
   const buf = await file.arrayBuffer();
   const sha256 = toHex(await crypto.subtle.digest('SHA-256', buf));
   if (existing.some((f) => f.sha256 === sha256)) throw new InputError('Ese mismo archivo ya está guardado en esta ficha.');
@@ -35,16 +64,19 @@ async function buildDocRecord(file, ownerType, ownerUuid, existing, { version = 
     uuid: newId(), owner_type: ownerType, owner_uuid: ownerUuid, ...(ownerType === 'pnt' ? { pnt_uuid: ownerUuid } : {}),
     kind: DOC_KINDS[kind] ? kind : 'documento', name: file.name.slice(0, 200), ext, mime: DOC_TYPES[ext].mime,
     size: file.size, version, sha256, uploaded_by: state.profile.name,
-    ...(images ? { local_only: true } : {}),
+    ...(local ? { local_only: true } : {}),
     blob: new Blob([buf], { type: DOC_TYPES[ext].mime }),
   };
 }
-const filePicker = (label, { accept = DOC_ACCEPT, camera = false } = {}) => `<div class="filepick">
+/** En el móvil (pantalla táctil) se ofrece también la cámara; en el PC basta con elegir el archivo. */
+const hasCamera = () => matchMedia('(pointer: coarse)').matches;
+const filePicker = (label = 'Elegir archivo', { accept = DOC_ACCEPT, camera = hasCamera() } = {}) => `<div class="filepick">
     <div class="actions">
       ${camera ? '<label class="btn secondary">Hacer foto<input type="file" name="file_cam" accept="image/*" capture="environment" data-docpick hidden></label>' : ''}
       <label class="btn secondary">${esc(label)}<input type="file" name="file" accept="${accept}" data-docpick hidden></label>
     </div>
     <p class="hint" data-file-chosen>Ningún archivo elegido</p>
+    <p class="hint">${FILE_TYPES_TEXT}, hasta 25 MB.</p>
   </div>`;
 /** Archivo elegido en el formulario (con el selector o con la cámara). */
 const pickedFile = (form) => (form.elements.file && form.elements.file.files[0]) || (form.elements.file_cam && form.elements.file_cam.files[0]) || null;
@@ -52,7 +84,7 @@ function docRow(f, current) {
   return `<li><a class="row" href="#documento--${esc(f.uuid)}"><div class="row-main"><strong>${esc(f.name)}</strong><span class="sub"><span class="doc-tag">${esc(DOC_TYPES[f.ext].label)}</span>${f.kind && f.kind !== 'documento' ? `<span>${esc(DOC_KINDS[f.kind])}</span>` : ''}${f.version ? `<span>Versión ${esc(f.version)}</span>` : ''}<span>${esc(fmtStamp(f.created_at).slice(0, 10))}</span><span>${fmtSize(f.size)}</span></span></div>${current ? '<span class="pill green">Vigente</span>' : ''}</a></li>`;
 }
 /** Bloque de documentos adjuntos para fichas de materias primas, envases, bibliografía y recetas de las elaboraciones. */
-async function docsSection(ownerType, ownerUuid, kinds, title = 'Documentos', { pickLabel = 'Adjuntar PDF o Word', accept = DOC_ACCEPT, camera = false, note = '', none = 'Sin documentos adjuntos.', submit = 'Guardar documento' } = {}) {
+async function docsSection(ownerType, ownerUuid, kinds, title = 'Documentos', { pickLabel = 'Elegir archivo', accept = DOC_ACCEPT, camera = hasCamera(), note = '', none = 'Sin documentos adjuntos.', submit = 'Guardar documento' } = {}) {
   const docs = (await docsOf(ownerUuid)).sort(latestFirst);
   return `<section><h2>${esc(title)}</h2>
     ${docs.length ? `<ul class="list">${docs.map((f) => docRow(f, false)).join('')}</ul>` : `<p class="hint none-docs">${esc(none)}</p>`}
@@ -73,7 +105,7 @@ Object.assign(FORMS, {
     if (!owner) throw new InputError('Esta ficha ya no existe.');
     const file = pickedFile(form);
     const kind = ownerType === 'production' ? 'receta' : form.elements.kind.value;
-    if (!file) throw new InputError(kind === 'receta' ? 'Haz una foto o elige el archivo de la receta.' : 'Elige un archivo PDF o Word.');
+    if (!file) throw new InputError(kind === 'receta' ? 'Haz una foto o elige el archivo de la receta.' : 'Haz una foto o elige un archivo.');
     const doc = await buildDocRecord(file, ownerType, ownerId, await docsOf(ownerId), { kind });
     // de la receta no se anota el nombre del archivo: puede llevar el nombre del paciente
     const detail = kind === 'receta'
@@ -343,13 +375,13 @@ async function viewPnt(id) {
          <button class="btn secondary" data-act="downloadDoc" data-id="${esc(current.uuid)}">Descargar</button>
          ${canShare ? `<button class="btn secondary" data-act="shareDoc" data-id="${esc(current.uuid)}">Abrir con otra app</button>` : ''}
        </div>`
-    : empty('Este PNT aún no tiene documento.', 'Súbelo en PDF o Word para consultarlo desde aquí, también sin conexión.')}
+    : empty('Este PNT aún no tiene documento.', 'Súbelo en PDF, Word o foto para consultarlo desde aquí, también sin conexión.')}
   </section>
   ${linked.length ? `<section><h2>Fórmulas que lo usan</h2><ul class="list">${linked.map((f) => `<li><a class="row" href="#formulas--${esc(f.uuid)}"><span class="row-main">${esc(f.name)}</span>${pill('formula', f.status)}</a></li>`).join('')}</ul></section>` : ''}
   ${gone ? '' : `<section><h2>${current ? 'Subir una versión nueva' : 'Subir documento'}</h2>
   <form class="panel form" data-form="pntDoc" data-id="${esc(p.uuid)}" novalidate>
     ${formMsg()}
-    ${filePicker('Elegir PDF o Word')}
+    ${filePicker()}
     <div class="grid2">
       ${field('Versión del PNT', text('version', `value="${esc(p.version)}" maxlength="30"`))}
       ${field('En vigor desde', dateInput('effective_date', p.effective_date))}
@@ -394,7 +426,7 @@ async function viewPntForm(id) {
       ${field('Entrada en vigor', dateInput('effective_date', v.effective_date))}
       ${field('Próxima revisión', dateInput('review_date', v.review_date))}
     </div>
-    ${p ? '' : `<div class="field"><span>Documento (opcional)</span>${filePicker('Elegir PDF o Word')}</div>`}
+    ${p ? '' : `<div class="field"><span>Documento (opcional)</span>${filePicker()}</div>`}
     ${field('Ubicación del original', text('file_note', `maxlength="500" value="${esc(v.file_note || '')}"`), 'Dónde está el documento en papel: carpeta, archivador...')}
     ${p ? '<p class="hint">El documento y el estado se cambian desde la ficha del PNT.</p>' : field('Estado', `<select name="status">${options(Object.keys(STATUS.pnt), 'borrador', STATUS.pnt)}</select>`)}
     <button class="btn block" type="submit">${p ? 'Guardar cambios' : 'Guardar PNT'}</button>
@@ -427,7 +459,7 @@ Object.assign(FORMS, {
       effective_date: isDay(d.effective_date) ? d.effective_date : null, review_date: isDay(d.review_date) ? d.review_date : null,
       status: STATUS.pnt[d.status] ? d.status : 'borrador', file_note: str(d.file_note).slice(0, 500),
     };
-    const file = form.elements.file && form.elements.file.files[0];
+    const file = pickedFile(form);
     if (file) {
       const doc = await buildDocRecord(file, 'pnt', rec.uuid, [], { version: rec.version });
       await saveMany([['pnt', rec], [FILE_STORE, doc]], 'alta_pnt', `${rec.code} ${rec.title} (con documento ${doc.name})`);
@@ -441,8 +473,8 @@ Object.assign(FORMS, {
   async pntDoc(form) {
     const p = await getOne('pnt', form.dataset.id);
     if (!p || p.deleted_at) throw new InputError('Este PNT ya no existe o está en la papelera.');
-    const file = form.elements.file.files[0];
-    if (!file) throw new InputError('Elige un archivo PDF o Word.');
+    const file = pickedFile(form);
+    if (!file) throw new InputError('Haz una foto o elige un archivo.');
     const version = str(form.elements.version.value).slice(0, 30) || p.version || '1';
     const doc = await buildDocRecord(file, 'pnt', p.uuid, await docsOf(p.uuid), { version });
     p.version = version;
@@ -501,7 +533,7 @@ async function viewBiblioForm(id) {
     ${field('Enlace', `<input type="url" name="url" value="${esc(v.url || '')}" maxlength="500" placeholder="https://">`)}
     ${field('Etiquetas', text('tags', `value="${esc(v.tags || '')}" maxlength="200"`), 'Palabras para encontrarla: por ejemplo, cápsulas, pediatría, estabilidad.')}
     ${field('Notas', `<textarea name="notes" maxlength="4000">${esc(v.notes || '')}</textarea>`)}
-    ${b ? '' : `<div class="field"><span>Documento (opcional)</span>${filePicker('Adjuntar PDF o Word')}</div>`}
+    ${b ? '' : `<div class="field"><span>Documento (opcional)</span>${filePicker()}</div>`}
     <button class="btn block" type="submit">${b ? 'Guardar cambios' : 'Guardar referencia'}</button>
   </form>`;
 }
@@ -520,7 +552,7 @@ Object.assign(FORMS, {
       authors: str(d.authors).slice(0, 250), source: str(d.source).slice(0, 200), year, url: url.slice(0, 500),
       tags: str(d.tags).slice(0, 200), notes: str(d.notes).slice(0, 4000),
     };
-    const file = !prev && form.elements.file && form.elements.file.files[0];
+    const file = !prev && pickedFile(form);
     if (file) {
       const doc = await buildDocRecord(file, 'biblio', rec.uuid, []);
       await saveMany([['biblio', rec], [FILE_STORE, doc]], 'alta_bibliografia', `${rec.title} (con documento ${doc.name})`);

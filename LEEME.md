@@ -1,4 +1,4 @@
-# FARMA·LAB móvil v0.3.12 (prototipo)
+# FARMA·LAB móvil v0.3.13 (prototipo)
 
 App que se instala desde Chrome o Edge (Android y Windows) y funciona sin conexión. Los datos se guardan **en el propio dispositivo** y, si se configura, se sincronizan entre el móvil y el PC a través de Google Drive.
 
@@ -11,8 +11,12 @@ App que se instala desde Chrome o Edge (Android y Windows) y funciona sin conexi
 - **Avisos en la app**: stock bajo, envases por reponer, caducidades, cuarentena, elaboraciones paradas más de 2 días y datos que faltan.
 - **Calculadora**: cantidad a pesar (% m/m, m/v, v/v, mg/g, mg/ml, ppm, 1:X, mg por unidad) con riqueza, factor sal/base y densidad; conversión de unidades y diluciones.
 - **Precio de las fórmulas financiadas** (Comunidad de Madrid), ver abajo.
-- **Documentos**: PNT y bibliografía con su PDF o Word, que se consultan dentro de la app, también sin conexión.
+- **Documentos**: PNT y bibliografía con su PDF, Word o foto, que se consultan dentro de la app, también sin conexión.
 - Registro de actividad, bloqueo con PIN, exportar e importar copias.
+
+## Novedades de la v0.3.13
+- **Fotos en todos los adjuntos.** Boletines de análisis, fichas de seguridad, especificaciones, documentos de envases, PNT, bibliografía y recetas admiten PDF, Word o foto. En el móvil hay un botón «Hacer foto» que abre la cámara; también se puede elegir una imagen JPG, PNG o WebP guardada. En el PC se elige el archivo.
+- Las fotos se guardan como JPG de hasta 2400 px por el lado largo (un folio se sigue leyendo bien): ocupan mucho menos, se ven derechas y se les quita la ubicación GPS y el resto de metadatos. Salvo las recetas, entran en las copias y en la sincronización como cualquier documento.
 
 ## Novedades de la v0.3.12
 - **Envase incluido con la materia prima.** Para vehículos que se elaboran en su propio frasco (por ejemplo, Finastopic), la ficha del lote tiene la casilla «Se elabora en su propio envase» y la descripción del envase. En la guía de elaboración aparece ya propuesto como material de acondicionamiento, con el lote del vehículo usado; no se descuenta aparte del stock de envases y figura en la ficha 2.

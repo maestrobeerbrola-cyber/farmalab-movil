@@ -6,7 +6,7 @@
  * sincronizarlo más adelante con la versión de PC.
  */
 
-const APP_VERSION = '0.3.12';
+const APP_VERSION = '0.3.13';
 const PREVIEW = document.documentElement.dataset.preview === '1'; // copia de prueba publicada en Claude
 const DB_NAME = 'farmalab-movil';
 const EXPORT_FORMAT = 'farmalab-datos';
@@ -22,9 +22,10 @@ const DOC_TYPES = {
   png: { label: 'Imagen PNG', mime: 'image/png', image: true },
   webp: { label: 'Imagen WebP', mime: 'image/webp', image: true },
 };
-const DOC_ACCEPT = '.pdf,.docx,.doc,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword';
+// En todos los adjuntos: PDF, Word o foto (cámara del móvil o imagen guardada).
+const DOC_ACCEPT = '.pdf,.docx,.doc,.jpg,.jpeg,.png,.webp,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword,image/jpeg,image/png,image/webp';
 const DOC_KINDS = { documento: 'Documento', boletin: 'Boletín de análisis', fds: 'Ficha de datos de seguridad', especificaciones: 'Especificaciones', otro: 'Otro', receta: 'Receta' };
-const RECETA_ACCEPT = `${DOC_ACCEPT},.jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp`;
+const RECETA_ACCEPT = DOC_ACCEPT;
 /**
  * Las recetas llevan datos del paciente y del prescriptor: se guardan solo en este dispositivo
  * (local_only), no van en las copias ni en la sincronización, y su nombre de archivo no pasa al registro de actividad.

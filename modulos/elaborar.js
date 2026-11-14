@@ -292,7 +292,7 @@ async function viewProduction(id) {
   </form>`;
   const receta = await docsSection('production', p.uuid, ['receta'], 'Receta', {
     pickLabel: 'Elegir archivo', accept: RECETA_ACCEPT, camera: true, none: 'Sin receta adjunta.', submit: 'Guardar receta',
-    note: 'PDF, Word o foto. Solo se guarda en este dispositivo: no va en las copias de seguridad porque contiene datos del paciente.',
+    note: 'Solo se guarda en este dispositivo: no va en las copias de seguridad ni se sincroniza porque contiene datos del paciente.',
   });
   return header + receta + guide;
 }
