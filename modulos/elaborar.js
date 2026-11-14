@@ -207,7 +207,7 @@ async function viewProduction(id) {
   ${p.status === 'elaborada' && !p.lot ? `<p class="msg warn">Esta elaboración se registró con una versión anterior y no tiene lote. <button class="btn small" data-act="assignLot" data-id="${esc(p.uuid)}">Asignar lote</button></p>` : ''}`;
 
   const weighBlocks = ws.map((w, i) => {
-    const lots = state.materials.filter((m) => fold(m.name) === fold(w.ingredient));
+    const lots = state.materials.filter((m) => fold(m.name) === fold(w.ingredient) && !lotArchived(m));   // sin los terminados ni los caducados
     return `<div class="weigh" role="group" aria-labelledby="w${i}">
       <h3 id="w${i}">${esc(w.ingredient)} ${compTags(w)}</h3>
       <div class="readouts">
@@ -517,7 +517,7 @@ Object.assign(FORMS, {
         return;
       }
       const [mats, packs, s] = [await getAll('material'), await getAll('packaging'), await loadSettings()];
-      const bad = rec.weighings.map((w) => findMaterialLot(mats, w.ingredient, w.material_lot)).filter((m) => m && (m.status !== 'aceptado' || (isDay(m.expiry) && daysUntil(m.expiry) < 0)));
+      const bad = rec.weighings.map((w) => findMaterialLot(mats, w.ingredient, w.material_lot)).filter((m) => m && (m.status !== 'aceptado' || lotArchived(m)));
       const elaborated = rec.elaborated_date || todayIso();
       const used = new Set((await getAll('production')).map((x) => x.lot).filter(Boolean));
       let n = Number(s.lot.next) || 1;
@@ -525,7 +525,7 @@ Object.assign(FORMS, {
       const lot = makeLot(s, n, elaborated);
       const plan = planConsumption(rec, mats, packs);
       const lines = plan.changes.map((c) => `${recordLabel(c.store, c.rec)}: −${fmtNum(c.amount)} ${c.unit} (quedan ${fmtNum(c.after)})${c.short ? ' ¡stock insuficiente!' : ''}`);
-      const msg = `Se asignará el lote ${lot}.\n\n${lines.length ? `Se descontará del stock:\n${lines.join('\n')}` : 'No hay stock registrado que descontar.'}${plan.notes.length ? `\n\nAvisos:\n${plan.notes.join('\n')}` : ''}${bad.length ? `\n\nAtención: hay lotes no aceptados o caducados (${bad.map((m) => `${m.name} ${m.lot}`).join(', ')}).` : ''}\n\nDespués no se podrán cambiar las pesadas.`;
+      const msg = `Se asignará el lote ${lot}.\n\n${lines.length ? `Se descontará del stock:\n${lines.join('\n')}` : 'No hay stock registrado que descontar.'}${plan.notes.length ? `\n\nAvisos:\n${plan.notes.join('\n')}` : ''}${bad.length ? `\n\nAtención: hay lotes no aceptados, caducados o terminados (${bad.map((m) => `${m.name} ${m.lot}`).join(', ')}).` : ''}\n\nDespués no se podrán cambiar las pesadas.`;
       if (!(await ask({ title: 'Marcar como elaborada', message: msg, confirmLabel: 'Marcar como elaborada' }))) {
         await save('production', rec, 'actualizar_pesadas', rec.record_code);
         toast('Guía guardada.');
@@ -550,7 +550,8 @@ Object.assign(FORMS, {
       const ns = { ...s, lot: { ...s.lot, next: n + 1 }, updated_at: nowIso() };
       await saveMany(entries, 'marcar_elaborada', `${lot} ${rec.formula_name} (${rec.record_code})`, extra, { settings: ns });
       state.settings = ns;
-      toast(`Elaborada. Lote ${lot}.`);
+      const emptied = plan.changes.filter((c) => c.store === 'material' && !(c.after > 0)).map((c) => recordLabel(c.store, c.rec));
+      toast(`Elaborada. Lote ${lot}.${emptied.length ? ` Sin existencias: ${emptied.join(', ')}. Si se ${emptied.length === 1 ? 'ha' : 'han'} terminado, márca${emptied.length === 1 ? 'lo' : 'los'} como terminado${emptied.length === 1 ? '' : 's'} en Almacén.` : ''}`);
       await route();
       return;
     }

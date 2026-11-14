@@ -495,6 +495,11 @@ function mpObservation(m, bulletins = []) {
   }
   const r = lastReview(m);
   if (r) parts.push(`Revisión anual: ${fmtDay(r.date)} (${r.by})`);
+  const c = m.closure || {};
+  if (archiveReason(m) === 'terminada') parts.push(`Lote terminado el ${fmtDay(c.date)}${c.by ? ` (${c.by})` : ''}`);
+  else if (archiveReason(m) === 'caducada') {
+    parts.push(m.closure ? `Caducado: ${lc(DISPOSALS[c.method] || 'retirado')} el ${fmtDay(c.date)}${c.detail ? ` (${c.detail})` : ''}${c.by ? ` por ${c.by}` : ''}` : (m.quantity > 0 ? 'Caducado: eliminación pendiente de registrar' : 'Caducado, sin existencias'));
+  }
   if (str(m.observations)) parts.push(m.observations);
   return parts.join('. ').replace(/\.\./g, '.');
 }

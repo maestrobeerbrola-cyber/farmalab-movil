@@ -1,4 +1,4 @@
-# FARMA·LAB móvil v0.3.21 (prototipo)
+# FARMA·LAB móvil v0.3.22 (prototipo)
 
 App que se instala desde Chrome o Edge (Android y Windows) y funciona sin conexión. Los datos se guardan **en el propio dispositivo** y, si se configura, se sincronizan entre el móvil y el PC a través de Google Drive.
 
@@ -14,6 +14,10 @@ App que se instala desde Chrome o Edge (Android y Windows) y funciona sin conexi
 - **Temperaturas** (PN/L/PG/009/00): lectura diaria del local y la nevera, incidencias y registro mensual en PDF.
 - **Documentos**: PNT y bibliografía con su PDF, Word o foto, que se consultan dentro de la app, también sin conexión.
 - Registro de actividad, bloqueo con PIN, exportar e importar copias.
+
+## Novedades de la v0.3.22
+- **Archivo de materias primas terminadas y caducadas** (Almacén → Materias primas → «Terminadas y caducadas»). Un lote aceptado se marca como terminado desde su ficha («Marcar como terminada»): sale de la lista, su stock pasa a 0 y queda en el archivo con la fecha y tu nombre. Si caduca, pasa solo al archivo; si aún tiene existencias, se pide retirarlo y registrar su devolución al proveedor o su eliminación (aviso rojo hasta que se registre). Los lotes archivados conservan su ficha, sus documentos y las elaboraciones en que se usaron, siguen en el registro en PDF (con la terminación o la eliminación en «Observaciones») y ya no se proponen en las elaboraciones ni en las etiquetas de estado. Un lote terminado por error se devuelve a la lista desde su ficha.
+- Los lotes sin existencias se señalan en la lista y, al marcar una elaboración como elaborada, la app avisa de los lotes que se han quedado a 0.
 
 ## Novedades de la v0.3.21
 - **Especificaciones (anexo III) propuestas desde el Formulario Nacional.** Al escribir el nombre de una materia prima nueva, o con el botón «Proponer desde el Formulario Nacional», se rellenan las casillas vacías: «Cumple RFE», nº y título de la monografía y, si el FN los da, las características y la conservación. Incluye las 39 materias primas con monografía en el FN y unas 70 más que aparecen en sus tablas de materias primas (excipientes, fórmulas tipificadas y preparados oficinales). Reconoce nombres en otro orden o sinónimos (lidocaína clorhidrato = hidrocloruro de lidocaína, bicarbonato sódico…). Las precauciones y la toxicidad se completan con la ficha de seguridad.

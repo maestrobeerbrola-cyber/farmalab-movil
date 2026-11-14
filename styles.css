@@ -143,6 +143,8 @@ a.row:active { background: var(--paper); }
 .msg.error { background: var(--red-bg); color: var(--red); }
 .msg.warn { background: var(--amber-bg); color: var(--amber); }
 .msg.ok { background: var(--green-bg); color: var(--green-ink); }
+.msg.plain { background: var(--gray-bg); color: var(--ink); }
+.panel > .head-row + .msg { margin: 10px 0 14px; }   /* aviso de la ficha: terminado, caducado o sin existencias */
 .msg.reminder { display: grid; gap: 10px; justify-items: start; margin-bottom: 16px; }
 .banner { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 16px; background: var(--amber-bg); color: var(--amber); font-size: 15px; }
 
@@ -299,6 +301,7 @@ input[type="text"].display-input:focus { outline: none; border: 0; }
 .seg a { flex: 1; padding: 9px 8px; border-radius: 9px; color: var(--muted); font-size: 15px; font-weight: 600; text-align: center; text-decoration: none; }
 .seg a[aria-current="page"] { background: var(--surface); color: var(--green-ink); box-shadow: 0 1px 2px rgba(20, 40, 60, .12); }
 .seg + .search { margin-top: -6px; }
+.msg + .search { margin-top: 0; }   /* un aviso encima: la barra de búsqueda no lo tapa */
 
 .tabbar .ind { position: relative; }
 .badge { position: absolute; top: -4px; right: 6px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--red); color: #fff; font-size: 11px; font-weight: 700; line-height: 18px; text-align: center; }

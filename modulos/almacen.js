@@ -55,11 +55,39 @@ function nextInternalNo(list, first = 'MP-0001') {
 }
 const AEMPS_ALERTS_URL = 'https://www.aemps.gob.es/comunicacion/alertas/alertas-farmaceuticas-y-retiradas-de-lotes-de-medicamentos-de-uso-humano-por-defectos-de-calidad/';
 
-ROUTES.materias = (arg, extra) => (arg === 'nueva' ? viewMaterialForm() : arg && extra === 'editar' ? viewMaterialForm(arg) : arg ? viewMaterial(arg) : viewMaterials());
+ROUTES.materias = (arg, extra) => (arg === 'nueva' ? viewMaterialForm() : arg === 'archivo' ? viewMaterialArchive() : arg && extra === 'editar' ? viewMaterialForm(arg) : arg ? viewMaterial(arg) : viewMaterials());
 ROUTES.envases = (arg, extra) => (arg === 'nuevo' ? viewPackagingForm() : arg && extra === 'editar' ? viewPackagingForm(arg) : arg ? viewPackaging(arg) : viewPackagings());
 
+// ------------------------------------------------------------------ archivo de materias primas: lotes terminados y caducados
+/*
+ * Un lote sale de la lista y pasa al archivo cuando se marca como terminado o cuando caduca. Conserva su ficha,
+ * sus documentos y su trazabilidad. Si caduca con existencias, queda pendiente de registrar su eliminación
+ * (devolución al proveedor o eliminación según su peligrosidad, como los rechazados del PN/L/PG/005/00, 4.2).
+ * Los rechazados siguen su propio camino (destino del lote rechazado).
+ */
+const ARCHIVE_REASONS = { terminada: 'Terminada', caducada: 'Caducada' };
+const lotExpired = (r) => isDay(r.expiry) && daysUntil(r.expiry) < 0;
+function archiveReason(m) {
+  if (m && m.closure && ARCHIVE_REASONS[m.closure.reason]) return m.closure.reason;
+  if (m && lotExpired(m) && m.status !== 'rechazado') return 'caducada';
+  return '';
+}
+const lotArchived = (m) => Boolean(archiveReason(m));
+/** Caducado con existencias y sin registrar su eliminación: hay que retirarlo. */
+const pendingElimination = (m) => archiveReason(m) === 'caducada' && !m.closure && (m.quantity ?? 0) > 0;
+const archiveDate = (m) => String((m.closure && m.closure.date) || m.expiry || '');
+const archivePill = (m) => `<span class="pill ${pendingElimination(m) ? 'red' : ''}">${esc(ARCHIVE_REASONS[archiveReason(m)] || '')}</span>`;
+/** Cuándo y cómo salió de la lista, en una línea. */
+function archiveWhen(m) {
+  const c = m.closure || {};
+  if (archiveReason(m) === 'terminada') return `Terminada el ${fmtDay(c.date)}${c.by ? ` por ${c.by}` : ''}`;
+  const when = isDay(m.expiry) ? `Caducó el ${fmtDay(m.expiry)}` : 'Caducada';
+  if (m.closure) return `${when}. ${DISPOSALS[c.method] || 'Retirada'} el ${fmtDay(c.date)}`;
+  return `${when}. ${pendingElimination(m) ? `Quedan ${fmtNum(m.quantity)} ${m.unit}: pendiente de eliminar` : 'Sin existencias'}`;
+}
+
 // ------------------------------------------------------------------ stock
-const usable = (r) => ['aceptado', 'cuarentena'].includes(r.status) && !(isDay(r.expiry) && daysUntil(r.expiry) < 0);
+const usable = (r) => ['aceptado', 'cuarentena'].includes(r.status) && !lotExpired(r) && !r.closure;
 /**
  * Agrupa lotes de la misma sustancia (o del mismo envase) y compara su stock con el mínimo más alto indicado.
  * Solo cuentan los lotes aceptados o en cuarentena y sin caducar.
@@ -90,11 +118,32 @@ const stockClass = (r) => (isNum(r.min_stock) && r.min_stock > 0 && r.quantity <
 
 // ------------------------------------------------------------------ Materias primas
 async function viewMaterials() {
-  const items = (await getAll('material')).sort(byText('name'));
+  const all = (await getAll('material')).sort(byText('name'));
+  const items = all.filter((m) => !lotArchived(m));
+  const archived = all.length - items.length;
+  const pending = all.filter(pendingElimination).length;
+  const qty = (m) => (m.quantity > 0 ? `<span class="${stockClass(m)}">${fmtNum(m.quantity)} ${esc(m.unit)}</span>` : '<span class="warn">Sin existencias</span>');
   const list = items.length
-    ? `<ul class="list" data-list>${items.map((m) => `<li data-text="${esc(lc([m.name, m.lot, m.internal_no, m.code, m.supplier, m.qc_no].join(' ')))}"><a class="row" href="#materias--${esc(m.uuid)}"><div class="row-main"><strong>${esc(m.name)}${m.internal_no ? ` <span class="code">${esc(m.internal_no)}</span>` : ''}</strong><span class="sub"><span>Lote ${esc(m.lot)}</span><span>Cad. ${fmtDay(m.expiry)}</span><span class="${stockClass(m)}">${fmtNum(m.quantity)} ${esc(m.unit)}</span>${kindTag(m.kind)}${packIncluded(m) ? '<span class="doc-tag">Envase incluido</span>' : ''}${m.edo ? '<span class="doc-tag edo">EDO</span>' : ''}</span></div>${pill('material', m.status)}</a></li>`).join('')}</ul><p class="none" data-none hidden>Ningún lote coincide con la búsqueda.</p>`
-    : empty('Aún no hay materias primas registradas.', 'Registra la primera recepción con «Nuevo lote».');
-  return `${segmented(STORE_TABS, '#materias')}${items.length ? searchBox('Buscar nombre, lote, nº interno o proveedor') : ''}${list}${items.length ? '<p class="more"><a href="#registromp">Registro de materias primas en PDF (anexo II)</a> · <a href="#etiquetaestado">Etiquetas de estado</a></p>' : ''}${fab('#materias--nueva', 'Nuevo lote')}`;
+    ? `<ul class="list" data-list>${items.map((m) => `<li data-text="${esc(lc([m.name, m.lot, m.internal_no, m.code, m.supplier, m.qc_no].join(' ')))}"><a class="row" href="#materias--${esc(m.uuid)}"><div class="row-main"><strong>${esc(m.name)}${m.internal_no ? ` <span class="code">${esc(m.internal_no)}</span>` : ''}</strong><span class="sub"><span>Lote ${esc(m.lot)}</span><span>Cad. ${fmtDay(m.expiry)}</span>${qty(m)}${kindTag(m.kind)}${packIncluded(m) ? '<span class="doc-tag">Envase incluido</span>' : ''}${m.edo ? '<span class="doc-tag edo">EDO</span>' : ''}</span></div>${pill('material', m.status)}</a></li>`).join('')}</ul><p class="none" data-none hidden>Ningún lote coincide con la búsqueda.${archived ? ' Si ya se ha terminado o ha caducado, búscalo en el archivo.' : ''}</p>`
+    : all.length
+      ? empty('No hay lotes en uso.', 'Los lotes terminados y caducados están en el archivo.')
+      : empty('Aún no hay materias primas registradas.', 'Registra la primera recepción con «Nuevo lote».');
+  const pendingMsg = pending ? `<p class="msg error">${pending === 1 ? 'Hay un lote caducado' : `Hay ${pending} lotes caducados`} con existencias: retíralo${pending === 1 ? '' : 's'} y registra su eliminación. <a href="#materias--archivo">Ver en el archivo</a></p>` : '';
+  const archiveLink = archived ? `<p><a class="btn secondary block" href="#materias--archivo">${ICON.archive}Terminadas y caducadas (${archived})</a></p>` : '';
+  return `${segmented(STORE_TABS, '#materias')}${pendingMsg}${items.length ? searchBox('Buscar nombre, lote, nº interno o proveedor') : ''}${list}${archiveLink}${all.length ? '<p class="more"><a href="#registromp">Registro de materias primas en PDF (anexo II)</a> · <a href="#etiquetaestado">Etiquetas de estado</a></p>' : ''}${fab('#materias--nueva', 'Nuevo lote')}`;
+}
+
+/** Archivo: lotes terminados y caducados, primero los caducados que aún hay que eliminar. */
+async function viewMaterialArchive() {
+  const items = (await getAll('material')).filter(lotArchived)
+    .sort((a, b) => (pendingElimination(b) - pendingElimination(a)) || archiveDate(b).localeCompare(archiveDate(a)) || byText('name')(a, b));
+  const pending = items.filter(pendingElimination).length;
+  const list = items.length
+    ? `<ul class="list" data-list>${items.map((m) => `<li data-text="${esc(lc([m.name, m.lot, m.internal_no, m.code, m.supplier, ARCHIVE_REASONS[archiveReason(m)]].join(' ')))}"><a class="row" href="#materias--${esc(m.uuid)}"><div class="row-main"><strong>${esc(m.name)}${m.internal_no ? ` <span class="code">${esc(m.internal_no)}</span>` : ''}</strong><span class="sub"><span>Lote ${esc(m.lot)}</span><span class="${pendingElimination(m) ? 'bad' : ''}">${esc(archiveWhen(m))}</span></span></div>${archivePill(m)}</a></li>`).join('')}</ul><p class="none" data-none hidden>Ningún lote del archivo coincide con la búsqueda.</p>`
+    : empty('El archivo está vacío.', 'Aquí pasan los lotes que marques como terminados y los que caduquen.');
+  return `<h2>Terminadas y caducadas</h2><p class="hint intro">Lotes que ya no están en uso: no salen en la lista ni se pueden usar en elaboraciones. Conservan su ficha, sus documentos y las elaboraciones en que se usaron, y siguen en el registro en PDF.</p>
+    ${pending ? `<p class="msg error">${pending === 1 ? 'Un lote caducado tiene' : `${pending} lotes caducados tienen`} existencias: retíralo${pending === 1 ? '' : 's'} del laboratorio y registra su eliminación en su ficha.</p>` : ''}
+    ${items.length ? searchBox('Buscar nombre, lote, nº interno o «terminada» / «caducada»') : ''}${list}`;
 }
 
 async function viewMaterial(id) {
@@ -109,12 +158,15 @@ async function viewMaterial(id) {
     sameLots.forEach((x) => { const q = convertQty(x.quantity, x.unit, m.unit); if (isNum(q)) total += q; });
     totalLine = `<p class="hint">Stock de ${esc(m.name)} en ${sameLots.length} lotes utilizables: <strong>${fmtNum(round6(total))} ${esc(m.unit)}</strong>.</p>`;
   }
-  const expired = isDay(m.expiry) && daysUntil(m.expiry) < 0;
+  const expired = lotExpired(m);
+  const reason = archiveReason(m);
+  if (reason) state.parent = '#materias--archivo';
   const used = (await getAll('production')).filter((p) => (p.weighings || []).some((w) => w.material_uuid === m.uuid || (w.material_lot && lc(w.material_lot) === lc(m.lot) && fold(w.ingredient) === fold(m.name))));
   const q = encodeURIComponent(m.name);
   const retFact = await retentionFact('material', m);
   return `<div class="panel">
-    <div class="head-row"><h2 class="big">${esc(m.name)}</h2>${pill('material', m.status)}</div>
+    <div class="head-row"><h2 class="big">${esc(m.name)}</h2>${reason ? archivePill(m) : pill('material', m.status)}</div>
+    ${archiveBanner(m)}
     ${facts([
       ['Nº registro interno', m.internal_no ? `<strong>${esc(m.internal_no)}</strong>` : '<span class="warn">Sin asignar</span>'],
       ['Tipo', `${esc(KIND_LABELS[m.kind] || 'Sin indicar')}${m.edo ? ' · <span class="warn">Excipiente de declaración obligatoria</span>' : ''}`],
@@ -125,7 +177,7 @@ async function viewMaterial(id) {
       ['Recepción', `${fmtDay(m.received_date)}${m.containers ? ` · ${esc(m.containers)} ${m.containers === 1 ? 'envase' : 'envases'}` : ''}`],
       ['Inspección en la recepción', inspectionDone(m.reception) ? `Conforme${m.reception.date ? ` el ${fmtDay(m.reception.date)}` : ''}${m.reception.by ? ` por ${esc(m.reception.by)}` : ''}` : '<span class="warn">Sin registrar</span> <span class="hint">(en «Editar ficha»)</span>'],
       ['Cantidad recibida', isNum(m.quantity_received) ? `${fmtNum(m.quantity_received)} ${esc(m.unit)}` : '—'],
-      ['Stock actual', `<span class="${stockClass(m)}">${fmtNum(m.quantity)} ${esc(m.unit)}</span>${isNum(m.min_stock) ? ` (mínimo ${fmtNum(m.min_stock)} ${esc(m.unit)})` : ''}`],
+      ['Stock actual', `<span class="${reason ? '' : stockClass(m)}">${fmtNum(m.quantity)} ${esc(m.unit)}</span>${isNum(m.min_stock) ? ` (mínimo ${fmtNum(m.min_stock)} ${esc(m.unit)})` : ''}`],
       ['Caducidad', `${fmtDay(m.expiry)}${expired ? ' <span class="bad">caducado</span>' : ''}`],
       ['Decisión', m.decision_date ? `${esc(STATUS.material[m.status])} el ${fmtDay(m.decision_date)} por ${esc(m.decision_by)}` : '<span class="warn">Pendiente</span>'],
       m.code ? ['Código de artículo', val(m.code)] : null,
@@ -145,14 +197,17 @@ async function viewMaterial(id) {
     ['Toxicidad y peligrosidad', val(m.toxicity)],
   ])}${specMissing(m).length ? `<p class="hint spaced">Falta: ${esc(specMissing(m).join(', '))}. Se completa en «Editar ficha».</p>` : ''}${m.observations ? `<p class="pre spaced">${esc(m.observations)}</p>` : ''}</div></section>
   ${await materialQcSection(m)}
-  <section><h2>Decisión de aceptación o rechazo</h2>${statusButtons('material', m)}
+  ${pendingElimination(m) ? `<section><h2>Eliminación del lote caducado</h2>${expiredDisposalForm(m)}</section>` : ''}
+  ${reason ? `<section><h2>Registro</h2>
+    <p><a class="btn block secondary" href="#fichamp--${esc(m.uuid)}">${ICON.doc}Registro y especificaciones en PDF (${esc((await loadSettings()).fn.mp_code)})</a></p></section>`
+    : `<section><h2>Decisión de aceptación o rechazo</h2>${statusButtons('material', m)}
     <p class="hint">Al aceptar o rechazar, la decisión queda fechada y firmada con tu nombre. Al aceptar se le da el nº de registro interno, que se anota en el registro y en la etiqueta del envase.</p>
     ${m.status === 'rechazado' ? disposalForm(m, 'material') : ''}
     ${m.status === 'aceptado' ? reviewBlock(m, 'material') : ''}
     ${statusLabelButton('material', m)}
     <p><a class="btn block secondary" href="#fichamp--${esc(m.uuid)}">${ICON.doc}Registro y especificaciones en PDF (${esc((await loadSettings()).fn.mp_code)})</a></p></section>
-  <section><h2>Regularizar stock</h2>${stockAdjustForm('material', m)}</section>
-  ${group && group.low ? `<p class="msg error">Stock bajo de ${esc(m.name)}: quedan ${fmtNum(group.total)} ${esc(group.unit)} y el mínimo es ${fmtNum(group.min)} ${esc(group.unit)}.</p>` : ''}
+  <section><h2>Stock</h2>${stockAdjustForm('material', m)}${finishBlock(m)}</section>
+  ${group && group.low ? `<p class="msg error">Stock bajo de ${esc(m.name)}: quedan ${fmtNum(group.total)} ${esc(group.unit)} y el mínimo es ${fmtNum(group.min)} ${esc(group.unit)}.</p>` : ''}`}
   ${await docsSection('material', m.uuid, ['boletin', 'fds', 'especificaciones', 'otro'], 'Boletín de análisis, ficha de seguridad y otros documentos')}
   <section><h2>Alertas y retiradas</h2><div class="panel stack">
     <p>Consulta en la AEMPS si hay alertas o retiradas que afecten a esta materia prima o a sus medicamentos.</p>
@@ -207,6 +262,47 @@ function disposalForm(m, store = 'material') {
     ${field('Detalle', text('detail', `value="${esc(d.detail || '')}" maxlength="200"`), 'Nº de albarán de devolución o método de eliminación según su peligrosidad.')}
     <button class="btn secondary block" type="submit">Registrar el destino</button>
     <p class="hint">Mientras tanto, mantenlo aparte y etiquetado como rechazado.</p>
+  </form>`;
+}
+const canFinish = (m) => !lotArchived(m) && ['aceptado', 'bloqueado'].includes(m.status);
+/** Aviso en la cabecera de la ficha: en el archivo (terminado o caducado) o sin existencias y aún en la lista. */
+function archiveBanner(m) {
+  const c = m.closure || {};
+  const reason = archiveReason(m);
+  const undo = (label) => `<button class="btn small secondary" type="button" data-act="reopenLot" data-id="${esc(m.uuid)}">${label}</button>`;
+  if (reason === 'terminada') {
+    return `<div class="msg plain reminder spaced"><p>Lote terminado el ${fmtDay(c.date)}${c.by ? ` por ${esc(c.by)}` : ''}${c.left > 0 ? ` (en la app quedaban ${fmtNum(c.left)} ${esc(m.unit)})` : ''}. Está en el archivo: no sale en la lista ni se puede usar en elaboraciones.</p>${undo('Devolver a la lista')}</div>`;
+  }
+  if (reason === 'caducada') {
+    const when = isDay(m.expiry) ? `Caducó el ${fmtDay(m.expiry)}` : 'Caducado';
+    if (m.closure) return `<div class="msg plain reminder spaced"><p>${when}. ${esc(DISPOSALS[c.method] || 'Retirado')} el ${fmtDay(c.date)}${c.detail ? ` (${esc(c.detail)})` : ''}${c.by ? ` por ${esc(c.by)}` : ''}. Está en el archivo.</p>${undo('Anular el registro de la eliminación')}</div>`;
+    if (pendingElimination(m)) return `<p class="msg error spaced">${when} y quedan ${fmtNum(m.quantity)} ${esc(m.unit)}. Ha salido de la lista y no se puede usar: retíralo del laboratorio y registra su eliminación más abajo.</p>`;
+    return `<p class="msg plain spaced">${when}, sin existencias. Está en el archivo.</p>`;
+  }
+  if (canFinish(m) && !(m.quantity > 0)) {
+    return `<div class="msg warn reminder spaced"><p>Este lote no tiene existencias. Si se ha terminado, márcalo como terminado: saldrá de la lista y pasará al archivo.</p><button class="btn small" type="button" data-act="finishLot" data-id="${esc(m.uuid)}">Marcar como terminada</button></div>`;
+  }
+  return '';
+}
+/** Botón para pasar al archivo un lote que se ha acabado. */
+function finishBlock(m) {
+  if (!canFinish(m)) return '';
+  return `<div class="panel stack spaced">
+    <p><strong>¿Se ha acabado el lote?</strong> Al marcarlo como terminado sale de la lista y pasa al archivo con su ficha, sus documentos y su trazabilidad.</p>
+    <button class="btn secondary small" type="button" data-act="finishLot" data-id="${esc(m.uuid)}">${ICON.archive}Marcar como terminada</button>
+  </div>`;
+}
+/** Lote caducado con existencias: devolución al proveedor o eliminación según su peligrosidad, que se registra. */
+function expiredDisposalForm(m) {
+  return `<form class="panel form" data-form="expiredDisposal" data-id="${esc(m.uuid)}" novalidate>
+    ${formMsg()}
+    <p class="hint">Quedan ${fmtNum(m.quantity)} ${esc(m.unit)}. Devuélvelo al proveedor o elimínalo por un método adecuado a su peligrosidad. Mientras tanto, mantenlo aparte para que no se use.</p>
+    <div class="grid2">
+      ${field('Destino', `<select name="method">${options(['', ...Object.keys(DISPOSALS)], '', { '': 'Elegir', ...DISPOSALS })}</select>`)}
+      ${field('Fecha', dateInput('date', todayIso()))}
+    </div>
+    ${field('Detalle', text('detail', 'maxlength="200"'), 'Método de eliminación según su peligrosidad o nº de albarán de devolución.')}
+    <button class="btn secondary block" type="submit">Registrar la eliminación</button>
   </form>`;
 }
 /** Revisión anual del estado del producto por el farmacéutico (PN/L/PG/005/00, 4.3). */
@@ -452,7 +548,7 @@ ALERT_SOURCES.push(async () => {
     ...(await getAll('packaging')).map((r) => ({ r, route: 'envases' })),
   ];
   const due = tagged.filter(({ r }) => {
-    if (r.status !== 'aceptado' || !(r.quantity > 0)) return false;
+    if (r.status !== 'aceptado' || !(r.quantity > 0) || lotArchived(r)) return false;
     const last = lastReview(r);
     const since = Date.parse((last && last.date) || r.decision_date || r.received_date || r.created_at);
     return Number.isFinite(since) && Date.now() - since > year;
@@ -574,6 +670,7 @@ NEEDED.materialQc = {
   },
 };
 NEEDED.recordDisposal = { goal: 'completar el registro del lote rechazado', fields: () => ['method', 'date'] };
+NEEDED.expiredDisposal = { goal: 'registrar la eliminación del lote caducado', fields: () => ['method', 'date'] };
 NEEDED.packaging = {
   goal: 'generar el registro de acondicionamiento (anexo II)',
   fields: (f) => [
@@ -600,6 +697,42 @@ Object.assign(ACTIONS, {
     toast('Revisión registrada.');
     await route();
   },
+  finishLot: async (el) => {
+    const m = await getOne('material', el.dataset.id);
+    if (!m || !canFinish(m)) return;
+    const left = isNum(m.quantity) && m.quantity > 0 ? m.quantity : 0;
+    const ok = await ask({
+      title: 'Marcar como terminada',
+      message: `${m.name} (lote ${m.lot}) sale de la lista de materias primas y pasa al archivo, con su ficha, sus documentos y las elaboraciones en que se usó. Ya no se podrá usar en elaboraciones.${left ? `\n\nEn la app quedan ${fmtNum(left)} ${m.unit}: el stock pasa a 0.` : ''}\n\nSi te equivocas, puedes devolverla a la lista desde el archivo.`,
+      confirmLabel: 'Marcar como terminada',
+    });
+    if (!ok) return;
+    m.closure = { reason: 'terminada', date: todayIso(), by: state.profile.name, left };
+    m.quantity = 0;
+    await save('material', m, 'lote_terminado_materia_prima', `${m.name} / ${m.lot}${m.internal_no ? ` (${m.internal_no})` : ''}${left ? `: quedaban ${fmtNum(left)} ${m.unit}` : ''}`);
+    toast(`${m.name} (lote ${m.lot}) está ahora en el archivo.`);
+    location.hash = '#materias';
+  },
+  reopenLot: async (el) => {
+    const m = await getOne('material', el.dataset.id);
+    if (!m || !m.closure) return;
+    const c = m.closure;
+    const finished = c.reason === 'terminada';
+    const stockLine = c.left > 0 ? ` El stock vuelve a ${fmtNum(c.left)} ${m.unit}.` : '';
+    const ok = await ask({
+      title: finished ? 'Devolver a la lista' : 'Anular el registro de la eliminación',
+      message: finished
+        ? `${m.name} (lote ${m.lot}) vuelve a la lista de materias primas.${stockLine || ' Su stock sigue en 0: regularízalo si queda algo.'}${lotExpired(m) ? '\n\nComo está caducado, seguirá en el archivo como caducado.' : ''}`
+        : `Se anula el registro de la eliminación de ${m.name} (lote ${m.lot}).${stockLine} Seguirá en el archivo como caducado pendiente de eliminar.`,
+      confirmLabel: finished ? 'Devolver a la lista' : 'Anular',
+    });
+    if (!ok) return;
+    if (!(m.quantity > 0) && c.left > 0) m.quantity = c.left;
+    m.closure = null;
+    await save('material', m, finished ? 'lote_reabierto_materia_prima' : 'eliminacion_anulada_materia_prima', `${m.name} / ${m.lot}`);
+    toast(finished && !lotExpired(m) ? 'El lote vuelve a estar en la lista.' : 'Registro de la eliminación anulado.');
+    await route();
+  },
 });
 Object.assign(FORMS, {
   async recordDisposal(form) {
@@ -612,6 +745,19 @@ Object.assign(FORMS, {
     m.disposal = { method: d.method, date: d.date, detail: str(d.detail).slice(0, 200), by: state.profile.name };
     await save(store, m, store === 'material' ? 'destino_rechazo_materia_prima' : 'destino_rechazo_acondicionamiento', `${m.name}${m.lot ? ` / ${m.lot}` : ''}: ${lc(DISPOSALS[d.method])} el ${fmtDay(d.date)}`);
     toast('Destino registrado.');
+    await route();
+  },
+  async expiredDisposal(form) {
+    const m = await getOne('material', form.dataset.id);
+    if (!m || !pendingElimination(m)) throw new InputError('Este lote no está pendiente de eliminar.');
+    const d = formData(form);
+    if (!DISPOSALS[d.method]) throw new InputError('Indica si se ha devuelto al proveedor o se ha eliminado.');
+    if (!isDay(d.date)) throw new InputError('Indica la fecha.');
+    const left = m.quantity;
+    m.closure = { reason: 'caducada', method: d.method, date: d.date, detail: str(d.detail).slice(0, 200), by: state.profile.name, left };
+    m.quantity = 0;
+    await save('material', m, 'eliminacion_caducada_materia_prima', `${m.name} / ${m.lot}: ${fmtNum(left)} ${m.unit}, ${lc(DISPOSALS[d.method])} el ${fmtDay(d.date)}`);
+    toast('Eliminación registrada.');
     await route();
   },
   async packElimination(form) {
@@ -638,6 +784,10 @@ Object.assign(ACTION_LABELS, {
   revision_anual_acondicionamiento: 'Revisión anual de acondicionamiento',
   destino_rechazo_acondicionamiento: 'Destino de acondicionamiento rechazado',
   eliminacion_acondicionamiento: 'Eliminación de acondicionamiento caducado u obsoleto',
+  lote_terminado_materia_prima: 'Lote de materia prima terminado',
+  lote_reabierto_materia_prima: 'Lote de materia prima devuelto a la lista',
+  eliminacion_caducada_materia_prima: 'Eliminación de materia prima caducada',
+  eliminacion_anulada_materia_prima: 'Eliminación de materia prima caducada anulada',
 });
 
 // ------------------------------------------------------------------ Material de acondicionamiento

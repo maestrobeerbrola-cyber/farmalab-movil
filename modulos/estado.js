@@ -54,7 +54,7 @@ async function viewStatusLabels() {
   const rows = [
     ...(await getAll('material')).map((r) => ({ store: 'material', r })),
     ...(await getAll('packaging')).map((r) => ({ store: 'packaging', r })),
-  ].filter(({ r }) => (r.quantity ?? 0) > 0 || r.status === 'rechazado')
+  ].filter(({ store, r }) => ((r.quantity ?? 0) > 0 || r.status === 'rechazado') && !(store === 'material' && lotArchived(r)))
     .sort((a, b) => String(b.r.received_date || b.r.created_at || '').localeCompare(String(a.r.received_date || a.r.created_at || '')));
   const order = ['cuarentena', 'aceptado', 'rechazado', 'bloqueado'];
   const groups = order.map((st) => [st, rows.filter((x) => x.r.status === st)]).filter(([, l]) => l.length);

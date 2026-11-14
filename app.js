@@ -6,7 +6,7 @@
  * sincronizarlo más adelante con la versión de PC.
  */
 
-const APP_VERSION = '0.3.21';
+const APP_VERSION = '0.3.22';
 const PREVIEW = document.documentElement.dataset.preview === '1'; // copia de prueba publicada en Claude
 const DB_NAME = 'farmalab-movil';
 const EXPORT_FORMAT = 'farmalab-datos';
@@ -464,6 +464,7 @@ async function saveSettings(s, detail) {
 // ------------------------------------------------------------------ iconos
 const svg = (body) => `<svg class="i" viewBox="0 0 24 24" aria-hidden="true">${body}</svg>`;
 const ICON = {
+  archive: svg('<path d="M3.5 4.5h17v4.5h-17z"/><path d="M5 9v10a1.5 1.5 0 0 0 1.5 1.5h11A1.5 1.5 0 0 0 19 19V9"/><path d="M10 13h4"/>'),
   cross: '<svg class="i solid" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6v6h6v6h-6v6H9v-6H3V9h6z"/></svg>',
   home: svg('<path d="M3.5 10.5 12 4l8.5 6.5V20a1 1 0 0 1-1 1H15v-6H9v6H4.5a1 1 0 0 1-1-1z"/>'),
   jar: svg('<path d="M8 3h8v3H8z"/><path d="M7 6h10l1.5 3v10.5A1.5 1.5 0 0 1 17 21H7a1.5 1.5 0 0 1-1.5-1.5V9z"/><path d="M5.5 12h13"/>'),
@@ -823,7 +824,7 @@ async function renderRoute() {
   view.innerHTML = html;
   // Para el diseño de pantalla ancha: qué apartado es y si es la lista, una ficha o un formulario.
   view.dataset.view = sec || 'inicio';
-  view.dataset.depth = !arg ? 'root' : (extra === 'editar' || ['nueva', 'nuevo'].includes(arg)) ? 'form' : 'detail';
+  view.dataset.depth = (!arg || arg === 'archivo') ? 'root' : (extra === 'editar' || ['nueva', 'nuevo'].includes(arg)) ? 'form' : 'detail';
   $('#title').textContent = info.title;
   const sub = Boolean(arg) || ['ajustes', 'auditoria', 'papelera', 'conservacion', 'sincronizacion', 'calculadora', 'valoracion', 'etiqueta', 'registromp', 'registroac', 'registrotemp', 'etiquetaestado'].includes(sec);
   $('#backBtn').hidden = !sub;
@@ -852,21 +853,21 @@ async function computeAlerts() {
   const [mats, packs, prods] = await Promise.all([getAll('material'), getAll('packaging'), getAll('production')]);
   const out = [];
   for (const g of stockGroups(mats, 'material')) {
-    if (g.low) out.push({ tone: 'red', kind: 'Stock bajo', title: g.name, text: `Quedan ${fmtNum(round6(g.total))} ${g.unit} (mínimo ${fmtNum(g.min)} ${g.unit})${g.active ? '. Principio activo' : ''}`, href: `#materias--${g.sample}` });
+    if (g.low) out.push({ tone: 'red', kind: 'Stock bajo', title: g.name, text: `${g.total > 0 ? `Quedan ${fmtNum(round6(g.total))} ${g.unit}` : 'Sin existencias en uso'} (mínimo ${fmtNum(g.min)} ${g.unit})${g.active ? '. Principio activo' : ''}`, href: `#materias--${g.sample}` });
   }
   for (const g of stockGroups(packs, 'packaging')) {
     if (g.low) out.push({ tone: 'red', kind: 'Reponer envases', title: g.name, text: `Quedan ${fmtNum(g.total)} unidades (mínimo ${fmtNum(g.min)})`, href: `#envases--${g.sample}` });
   }
   const expiring = [...mats.map((m) => ['materias', m]), ...packs.map((p) => ['envases', p])]
-    .filter(([, r]) => isDay(r.expiry) && !['rechazado', 'bloqueado'].includes(r.status) && (r.quantity ?? 1) > 0 && daysUntil(r.expiry) <= EXPIRY_WARNING_DAYS)
+    .filter(([, r]) => isDay(r.expiry) && !r.closure && !['rechazado', 'bloqueado'].includes(r.status) && (r.quantity ?? 1) > 0 && daysUntil(r.expiry) <= EXPIRY_WARNING_DAYS)
     .sort((a, b) => a[1].expiry.localeCompare(b[1].expiry));
   for (const [sec, r] of expiring) {
     const d = daysUntil(r.expiry);
-    const when = d < 0 ? `Caducado el ${fmtDay(r.expiry)}` : d === 0 ? 'Caduca hoy' : `Caduca el ${fmtDay(r.expiry)} (${d} ${d === 1 ? 'día' : 'días'})`;
+    const when = d < 0 ? (sec === 'materias' ? `Caducó el ${fmtDay(r.expiry)}: retíralo y registra su eliminación` : `Caducado el ${fmtDay(r.expiry)}`) : d === 0 ? 'Caduca hoy' : `Caduca el ${fmtDay(r.expiry)} (${d} ${d === 1 ? 'día' : 'días'})`;
     out.push({ tone: d < 0 ? 'red' : 'amber', kind: 'Caducidad', title: r.name, text: `Lote ${r.lot || '—'}. ${when}`, href: `#${sec}--${r.uuid}` });
   }
   for (const [sec, r] of [...mats.map((m) => ['materias', m]), ...packs.map((p) => ['envases', p])]) {
-    if (r.status === 'cuarentena') out.push({ tone: 'amber', kind: 'En cuarentena', title: r.name, text: `Lote ${r.lot || '—'}: pendiente de aceptación o rechazo`, href: `#${sec}--${r.uuid}` });
+    if (r.status === 'cuarentena' && !(sec === 'materias' && lotArchived(r))) out.push({ tone: 'amber', kind: 'En cuarentena', title: r.name, text: `Lote ${r.lot || '—'}: pendiente de aceptación o rechazo`, href: `#${sec}--${r.uuid}` });
   }
   for (const p of prods) {
     if (p.status === 'en_proceso') {
@@ -921,7 +922,7 @@ async function viewHome() {
     ? `<ul class="list">${open.map((p) => `<li><a class="row" href="#elaboraciones--${esc(p.uuid)}"><div class="row-main"><strong>${esc(p.record_code)}</strong><span class="sub"><span>${esc(p.formula_name)}</span><span>${fmtNum(p.target_amount)} ${esc(p.unit)}</span><span>${progressText(p)}</span></span></div></a></li>`).join('')}</ul>`
     : `<div class="empty"><strong>No hay elaboraciones en proceso.</strong><a class="btn secondary small" href="#elaboraciones--nueva">Nueva elaboración</a></div>`;
   html += `</section><section><h2>Registros</h2><ul class="list counts">
-    <li><a class="row" href="#materias"><span class="row-main">Materias primas</span><b>${mats.length}</b></a></li>
+    <li><a class="row" href="#materias"><span class="row-main">Materias primas en uso</span><b>${mats.filter((m) => !lotArchived(m)).length}</b></a></li>
     <li><a class="row" href="#envases"><span class="row-main">Material de acondicionamiento</span><b>${packs.length}</b></a></li>
     <li><a class="row" href="#formulas"><span class="row-main">Fórmulas</span><b>${forms.length}</b></a></li>
     <li><a class="row" href="#elaboraciones"><span class="row-main">Elaboraciones</span><b>${prods.length}</b></a></li>
