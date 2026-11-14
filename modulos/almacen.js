@@ -1,7 +1,7 @@
 'use strict';
 /* FARMA·LAB móvil · Almacén: materias primas (PN/L/PG/005) y material de acondicionamiento (PN/L/PG/006). */
 
-const STORE_TABS = [['#materias', 'Materias primas'], ['#envases', 'Acondicionamiento'], ['#temperaturas', 'Temperaturas']];
+const STORE_TABS = [['#materias', 'Materias primas'], ['#envases', 'Acondicionamiento']];
 const KIND_LABELS = { activo: 'Principio activo', excipiente: 'Excipiente', ambos: 'Principio activo o excipiente, según la fórmula' };
 const KIND_TAGS = { activo: 'PA', ambos: 'PA / EXC' };
 const kindTag = (k) => (KIND_TAGS[k] ? `<span class="doc-tag pa">${KIND_TAGS[k]}</span>` : '');

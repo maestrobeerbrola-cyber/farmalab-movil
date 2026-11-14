@@ -1,4 +1,4 @@
-# FARMA·LAB móvil v0.3.18 (prototipo)
+# FARMA·LAB móvil v0.3.19 (prototipo)
 
 App que se instala desde Chrome o Edge (Android y Windows) y funciona sin conexión. Los datos se guardan **en el propio dispositivo** y, si se configura, se sincronizan entre el móvil y el PC a través de Google Drive.
 
@@ -15,8 +15,11 @@ App que se instala desde Chrome o Edge (Android y Windows) y funciona sin conexi
 - **Documentos**: PNT y bibliografía con su PDF, Word o foto, que se consultan dentro de la app, también sin conexión.
 - Registro de actividad, bloqueo con PIN, exportar e importar copias.
 
+## Novedades de la v0.3.19
+- **Temperatura tiene su propia pestaña** en el menú de abajo, entre Elaborar y Documentos. Lleva un punto ámbar si falta la lectura de hoy y rojo si hay una temperatura fuera de rango o una incidencia abierta.
+
 ## Novedades de la v0.3.18
-- **Control y registro de temperaturas según el PN/L/PG/009/00 del Formulario Nacional** (Almacén → Temperaturas).
+- **Control y registro de temperaturas según el PN/L/PG/009/00 del Formulario Nacional** (pestaña Temperatura).
   - Lectura diaria de la temperatura actual, la máxima y la mínima del local (20–30 ºC) y de la nevera (2–8 ºC), con fecha, hora y firma. Se pueden añadir más neveras o zonas y cambiar los rangos (Ajustes → Temperaturas).
   - Si una lectura se sale del rango, la app avisa de que no se dispensen los productos afectados y abre el registro de incidencia (anexo IV): temperatura alcanzada, horas de exposición desde la lectura anterior, productos afectados (propone las materias primas y fórmulas que se conservan en ese punto), análisis de causas, evaluación, tratamiento (se acepta o se rechaza), medida correctora, fecha y firma. Numeración correlativa por año (1/2026, 2/2026…).
   - En Inicio, «Temperaturas de hoy» y avisos: lectura pendiente, lectura fuera de rango sin incidencia e incidencia abierta.

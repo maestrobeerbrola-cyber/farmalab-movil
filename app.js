@@ -6,7 +6,7 @@
  * sincronizarlo más adelante con la versión de PC.
  */
 
-const APP_VERSION = '0.3.18';
+const APP_VERSION = '0.3.19';
 const PREVIEW = document.documentElement.dataset.preview === '1'; // copia de prueba publicada en Claude
 const DB_NAME = 'farmalab-movil';
 const EXPORT_FORMAT = 'farmalab-datos';
@@ -114,12 +114,12 @@ const SECTIONS = {
   fichamp: { title: 'Registro de la materia prima', tab: 1 },
   registromp: { title: 'Registro de materias primas', tab: 1 },
   registroac: { title: 'Registro de acondicionamiento', tab: 1 },
-  temperaturas: { title: 'Temperaturas', tab: 1 },
-  registrotemp: { title: 'Registro de temperaturas', tab: 1 },
+  temperaturas: { title: 'Temperaturas', tab: 4 },
+  registrotemp: { title: 'Registro de temperaturas', tab: 4 },
   fichaenv: { title: 'Registro de envase', tab: 1 },
-  pnt: { title: 'PNT', tab: 4 },
-  biblio: { title: 'Bibliografía', tab: 4 },
-  documento: { title: 'Documento', tab: 4 },
+  pnt: { title: 'PNT', tab: 5 },
+  biblio: { title: 'Bibliografía', tab: 5 },
+  documento: { title: 'Documento', tab: 5 },
   calculadora: { title: 'Calculadora' },
   papelera: { title: 'Papelera' },
   conservacion: { title: 'Conservación' },
@@ -475,12 +475,15 @@ const ICON = {
   x: svg('<path d="M6 6l12 12M18 6 6 18"/>'),
   calc: svg('<rect x="5" y="3" width="14" height="18" rx="2"/><path d="M8 7h8M8.5 11h.01M12 11h.01M15.5 11h.01M8.5 14.5h.01M12 14.5h.01M15.5 14.5h.01M8.5 18h.01M12 18h3.5"/>'),
   box: svg('<path d="M3.5 7.5 12 3l8.5 4.5v9L12 21l-8.5-4.5z"/><path d="M3.5 7.5 12 12l8.5-4.5M12 12v9"/>'),
+  thermo: svg('<path d="M14 14.76V5a2 2 0 0 0-4 0v9.76a4 4 0 1 0 4 0z"/><path d="M12 9.5v7"/>'),
   book: svg('<path d="M5 4.5A1.5 1.5 0 0 1 6.5 3H19v15H6.5A1.5 1.5 0 0 0 5 19.5z"/><path d="M5 19.5A1.5 1.5 0 0 0 6.5 21H19v-3"/>'),
   tag: svg('<path d="M3 12V4h8l9.5 9.5-8 8z"/><circle cx="7.5" cy="8.5" r="1.5"/>'),
   ext: svg('<path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>'),
   sync: svg('<path d="M7 18.5H6.5a4 4 0 0 1-.6-7.96A5.5 5.5 0 0 1 16.6 9a3.75 3.75 0 0 1 .9 7.4"/><path d="M15 13.5l-3-3-3 3M12 10.5V20"/>'),
 };
-const TABS = [['#inicio', 'Inicio', ICON.home], ['#materias', 'Almacén', ICON.box], ['#formulas', 'Fórmulas', ICON.flask], ['#elaboraciones', 'Elaborar', ICON.scale], ['#pnt', 'Documentos', ICON.doc]];
+const TABS = [['#inicio', 'Inicio', ICON.home], ['#materias', 'Almacén', ICON.box], ['#formulas', 'Fórmulas', ICON.flask], ['#elaboraciones', 'Elaborar', ICON.scale], ['#temperaturas', 'Temperatura', ICON.thermo], ['#pnt', 'Documentos', ICON.doc]];
+// Punto de aviso en una pestaña (p. ej. temperatura sin registrar hoy o fuera de rango), por su enlace.
+const TAB_BADGES = { '#temperaturas': 'tempBadge' };
 
 // ------------------------------------------------------------------ piezas de interfaz
 const pill = (kind, status) => `<span class="pill ${TONE[status] || ''}">${esc((STATUS[kind] || {})[status] || status)}</span>`;
@@ -757,7 +760,7 @@ function renderShell() {
     ${PREVIEW ? '<div class="banner preview">Vista previa para probar la app. No guardes aquí datos reales: las copias de seguridad y la instalación solo funcionan en la versión publicada.</div>' : ''}
     <div id="banner"></div>
     <main id="view" tabindex="-1"></main>
-    <nav class="tabbar" aria-label="Secciones">${TABS.map(([href, label, icon], i) => `<a href="${href}"><span class="ind">${icon}${i === 0 ? '<span class="badge" id="alertBadge" hidden></span>' : ''}</span>${label}</a>`).join('')}</nav>
+    <nav class="tabbar" aria-label="Secciones">${TABS.map(([href, label, icon], i) => `<a href="${href}"><span class="ind">${icon}${i === 0 ? '<span class="badge" id="alertBadge" hidden></span>' : ''}${TAB_BADGES[href] ? `<span class="badge tab-dot" id="${TAB_BADGES[href]}" hidden></span>` : ''}</span><span class="tab-label">${label}</span></a>`).join('')}</nav>
     <div id="toast" role="status" aria-live="polite"></div>
   </div>`;
   showUpdateBanner();

@@ -60,16 +60,17 @@ svg.i.solid { fill: currentColor; stroke: none; }
 
 .tabbar {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 6;
-  display: grid; grid-template-columns: repeat(5, 1fr);
+  display: flex;   /* seis pestañas: cada una con el ancho de su texto y el sobrante repartido */
   height: calc(var(--tab-h) + env(safe-area-inset-bottom));
   padding-bottom: env(safe-area-inset-bottom);
   background: var(--surface); border-top: 1px solid var(--line);
 }
 .tabbar a {
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
-  color: var(--muted); font-size: 12px; font-weight: 500; text-decoration: none;
+  flex: 1 1 auto; min-width: 0; color: var(--muted); font-size: 11px; font-weight: 500; text-decoration: none;
 }
-.tabbar .ind { display: grid; place-items: center; width: 56px; height: 30px; border-radius: 15px; }
+.tabbar .tab-label { max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; letter-spacing: -0.1px; }
+.tabbar .ind { display: grid; place-items: center; width: 46px; height: 30px; border-radius: 15px; }
 .tabbar a[aria-current="page"] { color: var(--green-ink); font-weight: 600; }
 .tabbar a[aria-current="page"] .ind { background: var(--green-bg); }
 
@@ -454,3 +455,5 @@ details.more-reading summary { cursor: pointer; color: var(--green-ink); font-we
 .tprow button { grid-column: 3; grid-row: 1; }
 .tprow select { grid-column: 1 / -1; }
 .list .bad, .sub .bad { color: var(--red); font-weight: 600; }
+.badge.tab-dot { top: 1px; right: 7px; min-width: 10px; width: 10px; height: 10px; padding: 0; border: 2px solid var(--surface); box-sizing: content-box; }
+.badge.tab-dot.amber { background: #d48a14; }

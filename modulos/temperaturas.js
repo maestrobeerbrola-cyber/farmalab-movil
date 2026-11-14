@@ -115,8 +115,7 @@ async function viewTemperatures(key) {
   const open = incidents.filter((i) => i.status !== 'cerrada').sort(byNewest);
   const month = all.filter((r) => monthKeyOf(r.date) === key).reverse();
   const next = shiftMonth(key, 1);
-  return `${segmented(STORE_TABS, '#temperaturas')}
-    <p class="hint intro">PN/L/PG/009/00: al menos una lectura al día de la temperatura actual, la máxima y la mínima. Los días no laborables se anotan la máxima y la mínima a primera hora del primer día hábil. Después de anotarlas, pon a cero los fiadores del termómetro.</p>
+  return `<p class="hint intro">PN/L/PG/009/00: al menos una lectura al día de la temperatura actual, la máxima y la mínima. Los días no laborables se anotan la máxima y la mínima a primera hora del primer día hábil. Después de anotarlas, pon a cero los fiadores del termómetro.</p>
     ${cards}
     <section><h2>Incidencias</h2>
       ${open.length ? `<ul class="list">${open.map((i) => `<li><a class="row" href="#temperaturas--incidencia--${esc(i.uuid)}"><div class="row-main"><strong>Incidencia ${esc(i.code)} · ${esc(i.point_name)}</strong><span class="sub"><span>${fmtDay(i.detected_date)}</span><span>${esc(i.temp_reached || '')}</span></span></div>${pill('temp_incident', i.status)}</a></li>`).join('')}</ul>
@@ -732,7 +731,23 @@ NEEDED.tempIncident = {
   fields: () => ['detected_date', 'temp_reached', 'hours', 'products', 'causes', 'evaluation', 'decision', 'decision_date', 'decision_by'],
 };
 
-// ------------------------------------------------------------------ Inicio y avisos
+// ------------------------------------------------------------------ Inicio, pestaña y avisos
+/** Punto en la pestaña Temperatura: rojo si hay algo fuera de rango o una incidencia abierta; ámbar si falta la lectura de hoy. */
+async function updateTempBadge() {
+  const dot = $('#tempBadge');
+  if (!dot) return;
+  const s = await loadSettings();
+  const readings = await getAll('temperature');
+  const open = (await getAll('temp_incident')).some((i) => i.status !== 'cerrada');
+  const red = open || readings.some((r) => outOfRange(r) && !r.incident_uuid);
+  const today = todayIso();
+  const pending = s.temp.points.filter((p) => !readings.some((r) => r.point_id === p.id && r.date === today));
+  dot.hidden = !red && !pending.length;
+  dot.classList.toggle('amber', !red);
+  const tab = dot.closest('a');
+  if (tab) tab.setAttribute('aria-label', `Temperatura${red ? ': fuera de rango o incidencia abierta' : pending.length ? ': lectura pendiente hoy' : ''}`);
+}
+AFTER_RENDER.push(() => { updateTempBadge().catch((err) => console.error(err)); });
 HOME_BLOCKS.push(async () => {
   const s = await loadSettings();
   const today = todayIso();
