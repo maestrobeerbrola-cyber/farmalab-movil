@@ -1,6 +1,6 @@
 'use strict';
 /* FARMA·LAB móvil · Registros del RD 175/2001 en PDF A4:
-   ficha 1, control de calidad de materias primas (apartado 3.2.3);
+   materias primas: registro (anexo II) y especificaciones (anexo III) del PN/L/PG/005/00 del Formulario Nacional;
    registro de material de acondicionamiento (apartado 3.3 y PN/L/PG/006, anexo II), y
    ficha 2, registro de formulación magistral (apartado 3.4.2). */
 
@@ -101,7 +101,7 @@ async function createSheet({ title, subtitle, tag, running, footer, pharmacy, dr
   const font = await doc.embedFont(StandardFonts.Helvetica);
   const bold = await doc.embedFont(StandardFonts.HelveticaBold);
   const charset = new Set(font.getCharacterSet());
-  const clean = (t) => [...String(t ?? '').replace(/−/g, '-').replace(/[^\S\n]+/g, ' ')]
+  const clean = (t) => [...pdfSymbols(t).replace(/[^\S\n]+/g, ' ')]
     .map((ch) => (ch === '\n' || charset.has(ch.codePointAt(0)) ? ch : '?')).join('').trim();
   const mm = (v) => (v * 72) / 25.4;
   const W = mm(210); const H = mm(297); const M = mm(16); const CW = W - 2 * M;
@@ -386,19 +386,329 @@ async function buildRecordSheetPdf(p, d, s, draftMissing) {
   return sh.finish();
 }
 
-// ------------------------------------------------------------------ ficha 1: control de calidad de materias primas
-/** Datos de la ficha 1 que faltan en un lote. */
+/** Signos frecuentes en especificaciones que la fuente del PDF no tiene: se escriben con equivalentes. */
+function pdfSymbols(t) {
+  return String(t ?? '').replace(/−/g, '-').replace(/≤/g, '<=').replace(/≥/g, '>=').replace(/≈/g, '~').replace(/≠/g, '!=')
+    .replace(/[\u2009\u202f\u00a0]/g, ' ').replace(/→/g, '->');
+}
+// ------------------------------------------------------------------ materias primas: PN/L/PG/005/00 del Formulario Nacional
+/*
+ * Registro de materias primas (anexo II) y especificaciones (anexo III) del procedimiento
+ * «Recepción, control de conformidad y almacenamiento de materias primas» del Formulario Nacional,
+ * con su cabecera de procedimiento (título, código, página y procedimientos relacionados).
+ */
+const FN_MP_TITLE = 'Recepción, control de conformidad y almacenamiento de materias primas';
+
+/** Motor de hojas con el formato de los procedimientos del Formulario Nacional (A4 vertical, tablas con bordes). */
+async function createFnSheet({ code, related, procTitle, pharmacy, subject, draftMissing = [] }) {
+  const { PDFDocument, StandardFonts, rgb } = await loadPdfLib();
+  const doc = await PDFDocument.create();
+  doc.setTitle(subject);
+  doc.setSubject(`${procTitle} (${code})`);
+  doc.setCreator('FARMA·LAB');
+  doc.setProducer('FARMA·LAB');
+  const font = await doc.embedFont(StandardFonts.Helvetica);
+  const bold = await doc.embedFont(StandardFonts.HelveticaBold);
+  const charset = new Set(font.getCharacterSet());
+  const clean = (t) => [...pdfSymbols(t).replace(/[^\S\n]+/g, ' ')]
+    .map((ch) => (ch === '\n' || charset.has(ch.codePointAt(0)) ? ch : '?')).join('').trim();
+  const mm = (v) => (v * 72) / 25.4;
+  const W = mm(210); const H = mm(297); const M = mm(15); const CW = W - 2 * M;
+  const FOOT = mm(10);
+  const K = {
+    ink: rgb(0, 0, 0), mid: rgb(0.33, 0.33, 0.33), rule: rgb(0, 0, 0), fill: rgb(0.88, 0.88, 0.88),
+    faint: rgb(0.7, 0.7, 0.7), warn: rgb(0.52, 0.31, 0.04), warnBg: rgb(0.984, 0.933, 0.835),
+  };
+  const wrap = (f, size, value, width) => {
+    const out = [];
+    for (const para of clean(value).split('\n')) {
+      let line = '';
+      for (const word of para.split(' ')) {
+        let w = word;
+        while (f.widthOfTextAtSize(w, size) > width && w.length > 1) {
+          let cut = w.length - 1;
+          while (cut > 1 && f.widthOfTextAtSize(w.slice(0, cut), size) > width) cut -= 1;
+          if (line) { out.push(line); line = ''; }
+          out.push(w.slice(0, cut));
+          w = w.slice(cut);
+        }
+        const next = line ? `${line} ${w}` : w;
+        if (!line || f.widthOfTextAtSize(next, size) <= width) line = next; else { out.push(line); line = w; }
+      }
+      out.push(line);
+    }
+    return out;
+  };
+  const rect = (pg, x, top, w, h, fill) => pg.drawRectangle({ x, y: top - h, width: w, height: h, borderColor: K.rule, borderWidth: 0.7, ...(fill ? { color: fill } : {}) });
+  const vline = (pg, x, top, h) => pg.drawLine({ start: { x, y: top }, end: { x, y: top - h }, thickness: 0.7, color: K.rule });
+  const text = (pg, t, x, yy, size, f = font, color = K.ink) => pg.drawText(t, { x, y: yy, size, font: f, color });
+
+  // Cabecera de procedimiento en cada página: título | código y página; procedimientos relacionados.
+  const titleLines = wrap(bold, 10.5, procTitle, CW * 0.68 - mm(6));
+  const row1H = Math.max(titleLines.length * 13 + mm(5), mm(14));
+  const row2H = mm(6.5);
+  const HEAD_H = 12 + row1H + row2H;
+  const pages = []; const pageSlots = [];
+  let page; let y;
+  const drawHeader = (pg) => {
+    let top = H - M;
+    text(pg, clean(pharmacy && pharmacy.name ? pharmacy.name : 'Oficina de farmacia'), M, top - 8, 8.5, bold);
+    const pnt = 'PROCEDIMIENTOS NORMALIZADOS DE TRABAJO';
+    text(pg, pnt, W - M - font.widthOfTextAtSize(pnt, 7.5), top - 8, 7.5, font, K.mid);
+    top -= 12;
+    const leftW = CW * 0.68;
+    rect(pg, M, top, CW, row1H + row2H);
+    vline(pg, M + leftW, top, row1H);
+    pg.drawLine({ start: { x: M, y: top - row1H }, end: { x: M + CW, y: top - row1H }, thickness: 0.7, color: K.rule });
+    const ty0 = top - (row1H - titleLines.length * 13) / 2 - 10;
+    titleLines.forEach((ln, i) => text(pg, ln, M + mm(3), ty0 - i * 13, 10.5, bold));
+    text(pg, 'Código:', M + leftW + mm(3), top - mm(5), 7.5, font, K.mid);
+    text(pg, clean(code), M + leftW + mm(3) + font.widthOfTextAtSize('Código: ', 7.5), top - mm(5), 9, bold);
+    pageSlots.push({ pg, x: M + leftW + mm(3), y: top - row1H + mm(3.2) });
+    const rel = clean(`Procedimientos relacionados: ${related || ''}`);
+    text(pg, wrap(font, 8, rel, CW - mm(6))[0], M + mm(3), top - row1H - row2H + mm(2.1), 8);
+  };
+  const newPage = () => {
+    page = doc.addPage([W, H]);
+    pages.push(page);
+    drawHeader(page);
+    y = H - M - HEAD_H - mm(5);
+  };
+  const room = (h) => y - h >= M + FOOT;
+  const ensure = (h) => { if (!room(h)) { newPage(); return true; } return false; };
+
+  /** «ANEXO II» y el nombre del registro, centrados, como en el Formulario Nacional. */
+  const heading = (annex, title) => {
+    ensure(mm(30));
+    const a = clean(annex); const t = clean(title);
+    text(page, a, (W - bold.widthOfTextAtSize(a, 10)) / 2, y - 10, 10, bold);
+    text(page, t, (W - bold.widthOfTextAtSize(t, 13)) / 2, y - 27, 13, bold);
+    y -= 27 + mm(6);
+  };
+  /** Tabla con todos los bordes; la cabecera se repite al pasar de página. */
+  const table = (cols, rows, { size = 7.2, headSize = 6.6, minH = 0, fill = false } = {}) => {
+    const widths = cols.map((c) => c.w * CW);
+    const cp = 2.6;
+    const header = () => {
+      const lines = cols.map((c, i) => wrap(bold, headSize, c.title, widths[i] - 2 * cp));
+      const h = Math.max(...lines.map((l) => l.length)) * headSize * 1.2 + 2 * cp + 2;
+      ensure(h + Math.max(minH, 20));
+      rect(page, M, y, CW, h, K.fill);
+      let x = M;
+      lines.forEach((ls, i) => {
+        if (i) vline(page, x, y, h);
+        const block = ls.length * headSize * 1.2;
+        ls.forEach((ln, k) => {
+          const tw = bold.widthOfTextAtSize(ln, headSize);
+          text(page, ln, x + (widths[i] - tw) / 2, y - (h - block) / 2 - (k + 1) * headSize * 1.2 + 2, headSize, bold);
+        });
+        x += widths[i];
+      });
+      y -= h;
+    };
+    const drawRow = (row) => {
+      const lines = row.map((v, i) => wrap(i === 0 ? bold : font, size, v, widths[i] - 2 * cp));
+      const h = Math.max(minH, Math.max(...lines.map((l) => l.length)) * size * 1.25 + 2 * cp + 1);
+      if (!room(h)) { newPage(); header(); }
+      rect(page, M, y, CW, h);
+      let x = M;
+      lines.forEach((ls, i) => {
+        if (i) vline(page, x, y, h);
+        ls.forEach((ln, k) => text(page, ln, x + cp, y - cp - (k + 1) * size * 1.25 + 2, size, i === 0 ? bold : font));
+        x += widths[i];
+      });
+      y -= h;
+    };
+    header();
+    rows.forEach(drawRow);
+    if (fill) {   // filas en blanco hasta el pie, para seguir anotando a mano
+      const h = Math.max(minH, size * 1.25 + 2 * cp + 1);
+      while (room(h)) drawRow(cols.map(() => ''));
+    }
+  };
+  /** Recuadro con título («Observaciones:») y texto; si no cabe, continúa en la página siguiente. */
+  const box = (label, value, { minH = mm(18), size = 8 } = {}) => {
+    const lines = wrap(font, size, value, CW - mm(6));
+    const lh = size * 1.3;
+    let i = 0; let first = true;
+    do {
+      ensure(Math.min(minH, 40) + 16);
+      const avail = Math.floor((y - (M + FOOT) - mm(5) - 14) / lh);
+      const chunk = lines.slice(i, i + Math.max(1, avail));
+      const h = Math.max(first ? minH : 0, chunk.length * lh + mm(5) + 12);
+      rect(page, M, y, CW, h);
+      text(page, clean(first ? label : `${label} (continuación)`), M + mm(3), y - mm(2.5) - 7, 8, bold);
+      chunk.forEach((ln, k) => text(page, ln, M + mm(3), y - mm(2.5) - 9 - (k + 1) * lh + 2, size));
+      y -= h;
+      i += chunk.length; first = false;
+      if (i < lines.length) newPage();
+    } while (i < lines.length);
+  };
+  /** Fila con bordes: etiqueta en negrita y valor. */
+  const field1 = (label, value) => {
+    const l = clean(label);
+    const lw = bold.widthOfTextAtSize(l, 8.5) + mm(5);
+    const lines = wrap(font, 9.5, value, CW - lw - mm(4));
+    const h = Math.max(mm(9), lines.length * 12 + mm(4));
+    ensure(h);
+    rect(page, M, y, CW, h);
+    text(page, l, M + mm(3), y - h / 2 - 3, 8.5, bold);
+    lines.forEach((ln, k) => text(page, ln, M + lw, y - (h - lines.length * 12) / 2 - 9 - k * 12, 9.5));
+    y -= h;
+  };
+  /** Casillas (☐/☒) con un dato a la derecha, en un recuadro. */
+  const checks = (items) => {
+    const rh = mm(8.5);
+    const h = rh * items.length;
+    ensure(h);
+    rect(page, M, y, CW, h);
+    items.forEach((it, i) => {
+      const top = y - i * rh;
+      if (i) page.drawLine({ start: { x: M, y: top }, end: { x: M + CW, y: top }, thickness: 0.4, color: K.faint });
+      const bx = M + mm(3); const by = top - rh / 2 - 4.5;
+      page.drawRectangle({ x: bx, y: by, width: 9, height: 9, borderColor: K.rule, borderWidth: 0.8 });
+      if (it.on) {
+        page.drawLine({ start: { x: bx + 1.6, y: by + 1.6 }, end: { x: bx + 7.4, y: by + 7.4 }, thickness: 1.1, color: K.ink });
+        page.drawLine({ start: { x: bx + 1.6, y: by + 7.4 }, end: { x: bx + 7.4, y: by + 1.6 }, thickness: 1.1, color: K.ink });
+      }
+      text(page, clean(it.label), bx + 15, by + 1.5, 9.5, it.on ? bold : font);
+      if (it.extraLabel) {
+        const ex = M + CW * 0.42;
+        text(page, clean(it.extraLabel), ex, by + 1.5, 8.5, font, K.mid);
+        const vx = ex + font.widthOfTextAtSize(clean(it.extraLabel), 8.5) + 4;
+        page.drawLine({ start: { x: vx, y: by - 1 }, end: { x: M + CW - mm(3), y: by - 1 }, thickness: 0.5, color: K.faint, dashArray: [1.5, 1.5] });
+        if (it.extra) text(page, wrap(font, 9.5, it.extra, M + CW - mm(3) - vx)[0], vx + 2, by + 1.5, 9.5);
+      }
+    });
+    y -= h;
+  };
+  /** Tabla de dos columnas: apartado (sombreado) y contenido; un apartado vacío deja sitio para escribir. */
+  const kv = (rows, { labelW = 0.34, minH = mm(13) } = {}) => {
+    const lw = CW * labelW; const vw = CW - lw;
+    for (const [label, value] of rows) {
+      const ll = wrap(bold, 8.5, label, lw - mm(5));
+      const vl = str(value) ? wrap(font, 9, value, vw - mm(5)) : [];
+      const h = Math.max(minH, ll.length * 11 + mm(4), vl.length * 11.5 + mm(4));
+      ensure(h);
+      rect(page, M, y, lw, h, K.fill);
+      rect(page, M + lw, y, vw, h);
+      ll.forEach((ln, k) => text(page, ln, M + mm(2.5), y - mm(2.2) - 8 - k * 11, 8.5, bold));
+      vl.forEach((ln, k) => text(page, ln, M + lw + mm(2.5), y - mm(2.2) - 8 - k * 11.5, 9));
+      y -= h;
+    }
+  };
+  const gap = (v) => { y -= v; };
+  const draft = () => {
+    if (!draftMissing.length) return;
+    const lines = wrap(font, 8.4, `Faltan datos: ${draftMissing.join('; ')}.`, CW - mm(8));
+    const h = 13 + lines.length * 8.4 * 1.3 + mm(3);
+    ensure(h);
+    page.drawRectangle({ x: M, y: y - h, width: CW, height: h, color: K.warnBg });
+    text(page, 'Borrador: registro incompleto', M + mm(4), y - mm(2) - 9, 9.2, bold, K.warn);
+    let ty = y - mm(2) - 11;
+    lines.forEach((ln) => { ty -= 8.4 * 1.3; text(page, ln, M + mm(4), ty + 2, 8.4, font, K.warn); });
+    y -= h + mm(4);
+  };
+  const finish = async () => {
+    const stamp = new Date().toLocaleString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    pageSlots.forEach(({ pg, x, y: py }, i) => {
+      text(pg, `Página ${i + 1} de ${pages.length}`, x, py, 9, bold);
+      const foot = clean(`${draftMissing.length ? 'BORRADOR · ' : ''}Generado con FARMA·LAB el ${stamp}`);
+      text(pg, foot, W - M - font.widthOfTextAtSize(foot, 6.8), M, 6.8, font, K.mid);
+    });
+    return new Blob([await doc.save()], { type: 'application/pdf' });
+  };
+  newPage();
+  return { mm, heading, table, box, field1, checks, kv, gap, draft, newPage, finish };
+}
+
+const MP_DECISION = { aceptado: 'Aceptada', rechazado: 'Rechazada', bloqueado: 'Bloqueada', cuarentena: 'Pendiente (cuarentena)' };
+const yesNoMark = (v) => (v === true ? 'conforme' : v === false ? 'NO conforme' : 'sin valorar');
+/** Fila del registro de materias primas (anexo II), en el orden de sus columnas. */
+function mpRegisterRow(m) {
+  const qty = isNum(m.quantity_received) ? m.quantity_received : m.quantity;
+  const decided = ['aceptado', 'rechazado', 'bloqueado'].includes(m.status) && isDay(m.decision_date);
+  return [
+    m.internal_no || '', m.name, m.supplier || '', m.lot, m.qc_no || '', isDay(m.received_date) ? fmtDay(m.received_date) : '',
+    isNum(qty) ? `${fmtNum(qty)} ${m.unit}` : '', m.containers ? String(m.containers) : '',
+    MP_DECISION[m.status] || m.status, decided ? fmtDay(m.decision_date) : '', decided ? (m.decision_by || '') : '',
+  ];
+}
+/** Observaciones de un lote para el registro: caducidad, recepción, conformidad, destino, revisión y notas. */
+function mpObservation(m, bulletins = []) {
+  const parts = [];
+  if (isDay(m.expiry)) parts.push(`Caducidad: ${fmtDay(m.expiry)}`);
+  if (isDay(m.retest_date)) parts.push(`Próximo control analítico: ${fmtDay(m.retest_date)}`);
+  const rc = m.reception || {};
+  if (inspectionDone(rc)) parts.push(`Recepción conforme (albarán, material y envases)${rc.date ? ` el ${fmtDay(rc.date)}` : ''}${rc.by ? ` por ${rc.by}` : ''}`);
+  else parts.push('Inspección en la recepción no registrada');
+  const qc = m.qc || {};
+  const tests = (qc.tests || []).filter((t) => str(t.result));
+  if (tests.length) parts.push(`Control de conformidad${isDay(qc.date) ? ` (${fmtDay(qc.date)}${qc.by ? `, ${qc.by}` : ''})` : ''}: ${tests.map((t) => `${t.test || 'ensayo'}: ${t.result} (${yesNoMark(t.ok)})`).join('; ')}`);
+  if (bulletins.length) parts.push(`Boletín de análisis del proveedor archivado`);
+  if (packIncluded(m)) parts.push(`Su envase sirve de acondicionamiento: ${m.pack_desc}`);
+  if (m.status === 'rechazado') {
+    const d = m.disposal;
+    parts.push(d && DISPOSALS[d.method] ? `${DISPOSALS[d.method]} el ${fmtDay(d.date)}${d.detail ? ` (${d.detail})` : ''}${d.by ? `, ${d.by}` : ''}` : 'Destino del lote rechazado pendiente de registrar');
+  }
+  const r = lastReview(m);
+  if (r) parts.push(`Revisión anual: ${fmtDay(r.date)} (${r.by})`);
+  if (str(m.observations)) parts.push(m.observations);
+  return parts.join('. ').replace(/\.\./g, '.');
+}
+// Anchos en mm sobre los 180 mm útiles: las fechas caben en una línea y la firma tiene sitio para firmar a mano.
+const MP_COLS = [
+  ['Registro interno', 15], ['Nombre del producto', 24], ['Proveedor', 17], ['Lote', 16], ['Control de calidad', 16],
+  ['Fecha de recepción', 17], ['Cantidad', 14], ['Número de envases', 12], ['Decisión final', 15], ['Fecha', 17], ['Firma', 17],
+].map(([title, w]) => ({ title, w: w / 180 }));
+/** Anexo II: registro de materias primas (uno o varios lotes). */
+async function drawMpRegister(sh, lots, bulletinsOf, { fill = false } = {}) {
+  sh.heading('ANEXO II', 'Registro de materias primas');
+  sh.draft();
+  sh.table(MP_COLS, lots.map(mpRegisterRow), { minH: sh.mm(11), fill: false });
+  sh.gap(sh.mm(4));
+  const notes = lots.map((m) => {
+    const o = mpObservation(m, bulletinsOf(m));
+    return lots.length > 1 ? `${m.internal_no || 's/n'} · ${m.name} (lote ${m.lot}): ${o}` : o;
+  });
+  sh.box('Observaciones:', notes.join('\n'), { minH: sh.mm(fill ? 30 : 40) });
+}
+/** Anexo III: especificaciones de la materia prima. */
+function drawMpSpecs(sh, m) {
+  sh.heading('ANEXO III', 'Especificaciones');
+  sh.field1('Nombre de la materia prima:', m.name);
+  sh.gap(sh.mm(3));
+  sh.checks([
+    { on: m.spec_source === 'rfe', label: 'Cumple RFE', extraLabel: 'Monografía n.º', extra: m.spec_source === 'rfe' ? m.spec_monograph_no : '' },
+    { on: m.spec_source === 'otra', label: 'Otra farmacopea', extraLabel: 'Farmacopea', extra: m.spec_source === 'otra' ? m.spec_pharmacopoeia : '' },
+    { on: m.spec_source === 'fabricante', label: 'Fabricante o proveedor', extraLabel: '', extra: '' },
+  ]);
+  sh.gap(sh.mm(3));
+  sh.kv([
+    ['Monografía', m.monograph],
+    ['Identificación', m.spec_identification],
+    ['Impurezas', m.spec_impurities],
+    ['Descripción de los procedimientos analíticos', specMethods(m)],
+    ['Condiciones de conservación', m.storage],
+    ['Precauciones al manipular', m.handling],
+    ['Toxicidad y peligrosidad', m.toxicity],
+  ]);
+}
+
+/** Datos que pide el PN/L/PG/005/00 y faltan en un lote. */
 function materialSheetMissing(m) {
   const miss = [];
-  const tests = (m.qc && m.qc.tests) || [];
-  if (!m.internal_no) miss.push('nº de registro de control interno');
+  if (!m.internal_no) miss.push('nº de registro interno');
   if (!str(m.supplier)) miss.push('proveedor');
+  if (!str(m.qc_no)) miss.push('nº de control de calidad');
+  if (!isDay(m.received_date)) miss.push('fecha de recepción');
   if (!isNum(m.quantity_received) && !isNum(m.quantity)) miss.push('cantidad');
-  if (!isDay(m.expiry) && !isDay(m.retest_date)) miss.push('fecha de caducidad o de repetición del control analítico');
-  if (!tests.some((t) => str(t.result))) miss.push('ensayos realizados y sus resultados');
-  if (tests.some((t) => str(t.result) && t.ok === null)) miss.push('conformidad de cada ensayo');
-  if (!str(m.qc && m.qc.methods) && !tests.some((t) => str(t.method))) miss.push('técnicas o métodos analíticos');
-  if (!['aceptado', 'rechazado'].includes(m.status) || !isDay(m.decision_date)) miss.push('decisión de aceptación o rechazo');
+  if (!m.containers) miss.push('número de envases');
+  if (!isDay(m.expiry) && !isDay(m.retest_date)) miss.push('fecha de caducidad o del próximo control analítico');
+  if (!inspectionDone(m.reception)) miss.push('inspección en la recepción');
+  miss.push(...specMissing(m).map((x) => `especificaciones: ${x}`));
+  if (!['aceptado', 'rechazado'].includes(m.status) || !isDay(m.decision_date)) miss.push('decisión final (aceptación o rechazo), fecha y firma');
+  if (m.status === 'rechazado' && !(m.disposal && DISPOSALS[m.disposal.method])) miss.push('destino del lote rechazado');
   return miss;
 }
 
@@ -407,80 +717,66 @@ async function viewMaterialSheet(id) {
   if (!m) return empty('Este lote no existe.', '');
   state.parent = `#materias--${m.uuid}`;
   state.label = null;
+  const s = await loadSettings();
   const missing = materialSheetMissing(m);
   return `<div class="panel">
       <div class="head-row"><h2 class="big">${esc(m.name)}</h2>${pill('material', m.status)}</div>
       <p>${m.internal_no ? `${esc(m.internal_no)} · ` : ''}Lote ${esc(m.lot)}${m.supplier ? ` · ${esc(m.supplier)}` : ''}</p>
+      <p class="hint">Formato del ${esc(s.fn.mp_code)} del Formulario Nacional: anexo II (registro de materias primas) con este lote y anexo III (especificaciones).</p>
     </div>
     ${missing.length
-      ? `<div class="msg warn"><strong>Faltan datos:</strong> ${esc(missing.join(', '))}. Se puede generar como borrador; para la ficha definitiva, complétalos en la <a href="#materias--${esc(m.uuid)}">ficha del lote</a>.</div>`
-      : '<p class="msg ok">El control de calidad del lote está completo.</p>'}
+      ? `<div class="msg warn"><strong>Faltan datos:</strong> ${esc(missing.join('; '))}. Se puede generar como borrador; para el definitivo, complétalos en la <a href="#materias--${esc(m.uuid)}">ficha del lote</a>.</div>`
+      : '<p class="msg ok">El registro del lote está completo.</p>'}
     <form class="form" data-form="materialSheet" data-id="${esc(m.uuid)}" novalidate>
       ${formMsg()}
-      <button class="btn block" type="submit">${missing.length ? 'Generar borrador de la ficha' : 'Generar ficha de control de calidad'}</button>
+      <button class="btn block" type="submit">${missing.length ? 'Generar borrador' : 'Generar registro y especificaciones'}</button>
     </form>
+    <p class="more"><a href="#registromp">Registro de todos los lotes (anexo II)</a></p>
     <div id="sheetOut"></div>`;
 }
 
-const MATERIAL_DECISION = { aceptado: 'Aceptado', rechazado: 'Rechazado', bloqueado: 'Bloqueado' };
-/** Ficha 1: identificación del lote, controles efectuados, decisión y firma. */
+/** Lote: anexo II (su línea del registro y observaciones) y anexo III (especificaciones). */
 async function buildMaterialSheetPdf(m, s, bulletins, draftMissing) {
-  const sh = await createSheet({
-    title: 'Ficha de control de calidad de materias primas', subtitle: 'Datos de identificación y controles efectuados', tag: 'RD 175/2001 · Ficha 1',
-    running: `Ficha de control de calidad · ${m.name} · lote ${m.lot}`, footer: `FARMA·LAB · ${m.internal_no ? `${m.internal_no} · ` : ''}lote ${m.lot}`,
-    pharmacy: s.pharmacy, draftMissing,
+  const sh = await createFnSheet({
+    code: s.fn.mp_code, related: s.fn.mp_related, procTitle: FN_MP_TITLE, pharmacy: s.pharmacy,
+    subject: `Registro y especificaciones · ${m.name} · lote ${m.lot}`, draftMissing,
   });
-  const { mm, C } = sh;
-  const qc = m.qc || {};
-  const qty = isNum(m.quantity_received) ? m.quantity_received : m.quantity;
-  sh.grid([
-    { label: 'Nº de registro de control interno', value: m.internal_no || '—', big: true, span: 2 },
-    { label: 'Estado', value: STATUS.material[m.status] || m.status },
-    { label: 'Nombre de la materia prima', value: m.name, strong: true, span: 2 },
-    { label: 'Tipo', value: `${KIND_LABELS[m.kind] || 'Sin indicar'}${m.edo ? ' · excipiente de declaración obligatoria' : ''}` },
-    { label: 'Número de lote', value: m.lot },
-    { label: 'Proveedor', value: m.supplier || '—' },
-    { label: 'Código de artículo', value: m.code || '—' },
-    packIncluded(m) ? { label: 'Envase (acondicionamiento de la fórmula)', value: m.pack_desc, span: 3 } : null,
-    { label: 'Cantidad recibida', value: `${fmtNum(qty)} ${m.unit}${m.containers ? ` en ${m.containers} ${m.containers === 1 ? 'envase' : 'envases'}` : ''}` },
-    { label: 'Fecha de recepción', value: fmtDay(m.received_date) },
-    { label: 'Fecha de caducidad', value: fmtDay(m.expiry) },
-    isDay(m.retest_date) ? { label: 'Repetición del control analítico', value: fmtDay(m.retest_date) } : null,
-  ], 3, { bg: C.band, pad: mm(4) });
-
-  sh.section('Controles efectuados', mm(24));
-  const yesNo = (v) => (v === true ? 'Sí' : v === false ? 'No' : '—');
-  sh.table([
-    { title: 'Ensayo', w: 0.27 }, { title: 'Técnica o método', w: 0.30 }, { title: 'Resultado', w: 0.30 }, { title: 'Conforme', w: 0.13 },
-  ], (qc.tests || []).filter((t) => str(t.result) || str(t.method)).map((t) => [t.test || '—', t.method || '—', t.result || '—', yesNo(t.ok)]));
-  sh.gap(mm(2));
-  sh.grid([
-    { label: 'Realizado por', value: qc.by || '—' },
-    { label: 'Fecha del control', value: isDay(qc.date) ? fmtDay(qc.date) : '—' },
-    { label: 'Monografía de referencia', value: m.monograph || '—' },
-    { label: 'Boletín de análisis del proveedor', value: [m.qc_no && `Nº ${m.qc_no}`, bulletins.length && `archivado: ${bulletins.join(', ')}`].filter(Boolean).join(' · ') || '—', span: 3 },
-  ], 3);
-
-  sh.section('Descripción de los métodos analíticos');
-  sh.paragraph(qc.methods || '—', { color: qc.methods ? C.ink : C.muted });
-
-  sh.section('Datos complementarios', mm(16));
-  sh.grid([
-    { label: 'Condiciones de conservación', value: m.storage || '—' },
-    { label: 'Precauciones de manipulación', value: m.handling || '—' },
-    { label: 'Toxicidad y peligrosidad', value: m.toxicity || '—' },
-  ], 3);
-
-  sh.section('Observaciones');
-  sh.paragraph(m.observations || '—', { color: m.observations ? C.ink : C.muted });
-
-  const decided = MATERIAL_DECISION[m.status] && isDay(m.decision_date);
-  sh.signature({
-    decision: decided ? `${MATERIAL_DECISION[m.status]} el ${fmtDay(m.decision_date)} por ${m.decision_by || '—'}` : 'En cuarentena: pendiente de decisión',
-    rejected: m.status === 'rechazado',
-    signer: [m.decision_by || s.pharmacy.pharmacist, decided && `Fecha: ${fmtDay(m.decision_date)}`].filter(Boolean).join(' · '),
-  });
+  await drawMpRegister(sh, [m], () => bulletins);
+  sh.newPage();
+  drawMpSpecs(sh, m);
   return sh.finish();
+}
+/** Registro de materias primas de un periodo: anexo II con todos los lotes. */
+async function buildMpRegisterPdf(lots, s, period) {
+  const sh = await createFnSheet({
+    code: s.fn.mp_code, related: s.fn.mp_related, procTitle: FN_MP_TITLE, pharmacy: s.pharmacy,
+    subject: `Registro de materias primas · ${period}`,
+  });
+  const docs = await getAll(FILE_STORE);
+  const bulletinsOf = (m) => docs.filter((f) => f.owner_uuid === m.uuid && f.kind === 'boletin').map((f) => f.name);
+  await drawMpRegister(sh, lots, bulletinsOf, { fill: true });
+  return sh.finish();
+}
+
+ROUTES.registromp = () => viewMpRegister();
+async function viewMpRegister() {
+  state.parent = '#materias';
+  state.label = null;
+  const s = await loadSettings();
+  const lots = await getAll('material');
+  const years = [...new Set(lots.map((m) => String(m.received_date || m.created_at || '').slice(0, 4)).filter((y) => /^\d{4}$/.test(y)))].sort().reverse();
+  const current = String(new Date().getFullYear());
+  if (!years.includes(current)) years.unshift(current);
+  return `<div class="panel stack">
+      <h2 class="big">Registro de materias primas</h2>
+      <p>Anexo II del ${esc(s.fn.mp_code)} del Formulario Nacional: un lote por línea, por fecha de recepción, con sus observaciones (caducidad, recepción, control de conformidad, destino de los rechazados y revisión anual).</p>
+    </div>
+    <form class="form" data-form="mpRegister" novalidate>
+      ${formMsg()}
+      ${field('Lotes recibidos en', `<select name="period">${options([...years, 'todos'], current, { todos: 'Todos los años' })}</select>`)}
+      <button class="btn block" type="submit">Generar el registro</button>
+    </form>
+    <div id="sheetOut"></div>`;
 }
 
 // ------------------------------------------------------------------ registro de material de acondicionamiento
@@ -607,7 +903,20 @@ Object.assign(FORMS, {
     const blob = await buildMaterialSheetPdf(m, s, bulletins, missing);
     const slug = String(m.internal_no || m.lot).replace(/[^A-Za-z0-9._-]+/g, '-');
     await logOnly('ficha_mp_generada', `${m.name} / ${m.lot}${missing.length ? ' (borrador)' : ''}`);
-    await showSheet(blob, `ficha-control-${slug}.pdf`, missing.length ? 'Borrador listo' : 'Ficha lista');
+    await showSheet(blob, `registro-mp-${slug}.pdf`, missing.length ? 'Borrador listo' : 'Registro listo');
+  },
+
+  async mpRegister(form) {
+    const period = form.elements.period.value;
+    const s = await loadSettings();
+    const lots = (await getAll('material'))
+      .filter((m) => period === 'todos' || String(m.received_date || m.created_at || '').startsWith(period))
+      .sort((a, b) => String(a.received_date || a.created_at).localeCompare(String(b.received_date || b.created_at)) || String(a.internal_no || '').localeCompare(String(b.internal_no || ''), 'es', { numeric: true }));
+    if (!lots.length) throw new InputError('No hay lotes recibidos en ese periodo.');
+    const label = period === 'todos' ? 'todos los años' : period;
+    const blob = await buildMpRegisterPdf(lots, s, label);
+    await logOnly('registro_mp_generado', `${label}: ${lots.length} ${lots.length === 1 ? 'lote' : 'lotes'}`);
+    await showSheet(blob, `registro-materias-primas-${period}.pdf`, 'Registro listo');
   },
 
   async recordSheet(form) {

@@ -6,7 +6,7 @@
  * sincronizarlo más adelante con la versión de PC.
  */
 
-const APP_VERSION = '0.3.13';
+const APP_VERSION = '0.3.14';
 const PREVIEW = document.documentElement.dataset.preview === '1'; // copia de prueba publicada en Claude
 const DB_NAME = 'farmalab-movil';
 const EXPORT_FORMAT = 'farmalab-datos';
@@ -90,7 +90,7 @@ const ACTION_LABELS = {
   restaurar_pnt: 'PNT restaurado',
   edicion_pnt: 'Edición de PNT',
   ficha_generada: 'Ficha de registro generada',
-  ficha_mp_generada: 'Ficha de control de materia prima generada',
+  ficha_mp_generada: 'Registro y especificaciones de materia prima generados',
   ficha_env_generada: 'Registro de acondicionamiento generado',
   control_calidad_materia_prima: 'Control de calidad de materia prima',
   valoracion_precio: 'Precio de valoración guardado',
@@ -110,7 +110,8 @@ const SECTIONS = {
   elaboraciones: { title: 'Elaboraciones', tab: 3 },
   etiqueta: { title: 'Etiqueta', tab: 3 },
   ficha: { title: 'Ficha de registro', tab: 3 },
-  fichamp: { title: 'Ficha de control', tab: 1 },
+  fichamp: { title: 'Registro de la materia prima', tab: 1 },
+  registromp: { title: 'Registro de materias primas', tab: 1 },
   fichaenv: { title: 'Registro de envase', tab: 1 },
   pnt: { title: 'PNT', tab: 4 },
   biblio: { title: 'Bibliografía', tab: 4 },
@@ -141,6 +142,8 @@ const DEFAULT_SETTINGS = {
   pricing: { p_factor: 3.65, iva: 4 },     // factor P 2026 (Anexo 3 del Convenio con la Comunidad de Madrid) e IVA de medicamentos
   // años de conservación desde la caducidad y días de aviso antes de borrar
   retention: { enabled: true, production: { general: 1, psicotropo: 2, estupefaciente: 5, veterinaria: 5 }, material: 1, packaging: 1, notice_days: 30 },
+  // PNT de recepción, control de conformidad y almacenamiento de materias primas (Formulario Nacional)
+  fn: { mp_code: 'PN/L/PG/005/00', mp_related: '' },
   updated_at: '',
 };
 
@@ -391,6 +394,7 @@ function normalizeSettings(stored) {
     lot: { ...DEFAULT_SETTINGS.lot, ...(saved.lot || {}) },
     label: { ...DEFAULT_SETTINGS.label, ...(saved.label || {}) },
     pricing: { ...DEFAULT_SETTINGS.pricing, ...(saved.pricing || {}) },
+    fn: { ...DEFAULT_SETTINGS.fn, ...(saved.fn || {}) },
     retention: {
       ...DEFAULT_SETTINGS.retention, ...(saved.retention || {}),
       production: { ...DEFAULT_SETTINGS.retention.production, ...((saved.retention && saved.retention.production) || {}) },
@@ -403,6 +407,7 @@ function normalizeSettings(stored) {
   s.retention.enabled = s.retention.enabled !== false;
   if (!(isNum(s.pricing.p_factor) && s.pricing.p_factor > 0)) s.pricing.p_factor = DEFAULT_SETTINGS.pricing.p_factor;
   if (!(isNum(s.pricing.iva) && s.pricing.iva >= 0)) s.pricing.iva = DEFAULT_SETTINGS.pricing.iva;
+  if (!str(s.fn.mp_code)) s.fn.mp_code = DEFAULT_SETTINGS.fn.mp_code;
   return s;
 }
 /**
@@ -417,6 +422,7 @@ function mergeSettings(local, incoming) {
     pharmacy: { ...local.pharmacy, ...(incoming.pharmacy || {}) },
     label: { ...local.label, ...(incoming.label || {}) },
     pricing: { ...local.pricing, ...(incoming.pricing || {}) },
+    fn: { ...local.fn, ...(incoming.fn || {}) },
     retention: { ...local.retention, ...(incoming.retention || {}), production: { ...local.retention.production, ...((incoming.retention && incoming.retention.production) || {}) } },
   } : { ...local };
   const nextLot = Math.max(Number(local.lot.next) || 1, Number(incoming.lot && incoming.lot.next) || 1);
@@ -737,7 +743,7 @@ async function renderRoute() {
   state.objectUrls = [];
   $('#view').innerHTML = html;
   $('#title').textContent = info.title;
-  const sub = Boolean(arg) || ['ajustes', 'auditoria', 'papelera', 'conservacion', 'sincronizacion', 'calculadora', 'valoracion', 'etiqueta'].includes(sec);
+  const sub = Boolean(arg) || ['ajustes', 'auditoria', 'papelera', 'conservacion', 'sincronizacion', 'calculadora', 'valoracion', 'etiqueta', 'registromp'].includes(sec);
   $('#backBtn').hidden = !sub;
   $('#mark').hidden = sub;
   $$('.tabbar a').forEach((a, i) => {
@@ -923,6 +929,13 @@ async function viewSettings() {
       ${field('Días de aviso antes de borrar', `<input type="text" inputmode="numeric" name="ret_notice" value="${esc(s.retention.notice_days)}" maxlength="3">`, 'Mínimo 30.')}
       ${checkbox('ret_enabled', 'Borrar automáticamente al cumplir el plazo', s.retention.enabled)}
       <p class="hint">Si lo desactivas, solo se muestran los avisos. La clase de cada fórmula (psicótropos, estupefacientes, uso veterinario) se elige en la propia fórmula.</p>
+    </div></section>
+    <section><h2>Registro de materias primas</h2><div class="panel form">
+      <div class="grid2">
+        ${field('Código del PNT', text('fn_mp_code', `value="${esc(s.fn.mp_code)}" maxlength="40"`), 'Formulario Nacional: PN/L/PG/005/00.')}
+        ${field('Procedimientos relacionados', text('fn_mp_related', `value="${esc(s.fn.mp_related)}" maxlength="120"`), 'Opcional. Por ejemplo: PN/L/PG/006/00.')}
+      </div>
+      <p class="hint">Aparecen en la cabecera del registro (anexo II) y de las especificaciones (anexo III).</p>
     </div></section>
     <section><h2>Utillaje y controles habituales</h2><div class="panel form">
       ${field('Utillaje del laboratorio', `<textarea name="equipment" rows="6">${esc(s.equipment.join('\n'))}</textarea>`, 'Uno por línea. Se ofrece al registrar cada elaboración.')}
@@ -1275,6 +1288,7 @@ const ACTIONS = {
     if (!rec || rec.status === status) return;
     const check = STATUS_CHECKS[store] ? await STATUS_CHECKS[store](rec, status) : null;
     if (check && !(await ask(check))) return;
+    if (check && typeof check.apply === 'function') check.apply(rec);   // p. ej., el nº de registro interno al aceptar
     rec.status = status;
     if ((store === 'material' || store === 'packaging') && ['aceptado', 'rechazado'].includes(status)) {
       rec.decision_date = todayIso();
@@ -1441,6 +1455,7 @@ const FORMS = {
       lot: { letter, next },
       label: { layout: d.label_layout === '2' ? '2' : '8', all_components: d.label_all === 'on' },
       pricing: { p_factor: pFactor, iva },
+      fn: { mp_code: str(d.fn_mp_code).slice(0, 40) || DEFAULT_SETTINGS.fn.mp_code, mp_related: str(d.fn_mp_related).slice(0, 120) },
       retention,
       equipment: lines(d.equipment),
       qc_tests: lines(d.qc_tests),

@@ -15,6 +15,41 @@ const PACK_CHECKS = {
   estado: 'El estado de envases, embalajes y etiquetado es correcto',
 };
 const inspectionDone = (insp) => Boolean(insp && Object.keys(PACK_CHECKS).every((k) => insp[k]));
+// PN/L/PG/005/00 (Formulario Nacional): la inspección en la recepción de materias primas es la misma (apartado 4.1).
+const MP_RECEPTION_CHECKS = PACK_CHECKS;
+/** Origen de las especificaciones (anexo III), por orden de preferencia (apartado 4.2). */
+const SPEC_SOURCES = { rfe: 'Cumple RFE', otra: 'Otra farmacopea', fabricante: 'Fabricante o proveedor' };
+const specMethods = (m) => str(m.spec_methods ?? (m.qc && m.qc.methods));
+/** Especificaciones que faltan según su origen (PN/L/PG/005/00, 4.2). */
+function specMissing(m) {
+  const miss = [];
+  if (!SPEC_SOURCES[m.spec_source]) miss.push('origen de las especificaciones (RFE, otra farmacopea o fabricante)');
+  if (m.spec_source === 'rfe' && !str(m.spec_monograph_no)) miss.push('nº de monografía de la RFE');
+  if (m.spec_source === 'otra') {
+    if (!str(m.spec_pharmacopoeia)) miss.push('farmacopea de referencia');
+    if (!str(m.spec_identification)) miss.push('identificación');
+    if (!str(m.spec_impurities)) miss.push('impurezas');
+    if (!specMethods(m)) miss.push('descripción de los procedimientos analíticos');
+  }
+  if (!str(m.storage)) miss.push('condiciones de conservación');
+  if (!str(m.handling)) miss.push('precauciones al manipular');
+  if (!str(m.toxicity)) miss.push('toxicidad y peligrosidad');
+  return miss;
+}
+const DISPOSALS = { devuelto: 'Devuelto al proveedor', eliminado: 'Eliminado' };
+const lastReview = (m) => (Array.isArray(m.reviews) && m.reviews.length ? m.reviews[m.reviews.length - 1] : null);
+/** Propone el siguiente nº de registro interno siguiendo el modelo del último lote numerado (MP-0012 → MP-0013). */
+function nextInternalNo(list) {
+  const numbered = list.filter((m) => str(m.internal_no));
+  if (!numbered.length) return 'MP-0001';
+  const pattern = /^(.*?)(\d+)(\D*)$/;
+  const latest = numbered.sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')))[0].internal_no;
+  const p = pattern.exec(latest);
+  if (!p) return '';
+  let max = 0;
+  numbered.forEach((m) => { const x = pattern.exec(m.internal_no); if (x && x[1] === p[1] && x[3] === p[3]) max = Math.max(max, Number(x[2])); });
+  return `${p[1]}${String(max + 1).padStart(p[2].length, '0')}${p[3]}`;
+}
 const AEMPS_ALERTS_URL = 'https://www.aemps.gob.es/comunicacion/alertas/alertas-farmaceuticas-y-retiradas-de-lotes-de-medicamentos-de-uso-humano-por-defectos-de-calidad/';
 
 ROUTES.materias = (arg, extra) => (arg === 'nueva' ? viewMaterialForm() : arg && extra === 'editar' ? viewMaterialForm(arg) : arg ? viewMaterial(arg) : viewMaterials());
@@ -56,7 +91,7 @@ async function viewMaterials() {
   const list = items.length
     ? `<ul class="list" data-list>${items.map((m) => `<li data-text="${esc(lc([m.name, m.lot, m.internal_no, m.code, m.supplier, m.qc_no].join(' ')))}"><a class="row" href="#materias--${esc(m.uuid)}"><div class="row-main"><strong>${esc(m.name)}${m.internal_no ? ` <span class="code">${esc(m.internal_no)}</span>` : ''}</strong><span class="sub"><span>Lote ${esc(m.lot)}</span><span>Cad. ${fmtDay(m.expiry)}</span><span class="${stockClass(m)}">${fmtNum(m.quantity)} ${esc(m.unit)}</span>${kindTag(m.kind)}${packIncluded(m) ? '<span class="doc-tag">Envase incluido</span>' : ''}${m.edo ? '<span class="doc-tag edo">EDO</span>' : ''}</span></div>${pill('material', m.status)}</a></li>`).join('')}</ul><p class="none" data-none hidden>Ningún lote coincide con la búsqueda.</p>`
     : empty('Aún no hay materias primas registradas.', 'Registra la primera recepción con «Nuevo lote».');
-  return `${segmented(STORE_TABS, '#materias')}${items.length ? searchBox('Buscar nombre, lote, nº interno o proveedor') : ''}${list}${fab('#materias--nueva', 'Nuevo lote')}`;
+  return `${segmented(STORE_TABS, '#materias')}${items.length ? searchBox('Buscar nombre, lote, nº interno o proveedor') : ''}${list}${items.length ? '<p class="more"><a href="#registromp">Registro de materias primas en PDF (anexo II)</a></p>' : ''}${fab('#materias--nueva', 'Nuevo lote')}`;
 }
 
 async function viewMaterial(id) {
@@ -85,6 +120,7 @@ async function viewMaterial(id) {
       ['Nº control de calidad', val(m.qc_no)],
       packIncluded(m) ? ['Envase', `${esc(m.pack_desc)} <span class="hint">(sirve de acondicionamiento de la fórmula)</span>`] : null,
       ['Recepción', `${fmtDay(m.received_date)}${m.containers ? ` · ${esc(m.containers)} ${m.containers === 1 ? 'envase' : 'envases'}` : ''}`],
+      ['Inspección en la recepción', inspectionDone(m.reception) ? `Conforme${m.reception.date ? ` el ${fmtDay(m.reception.date)}` : ''}${m.reception.by ? ` por ${esc(m.reception.by)}` : ''}` : '<span class="warn">Sin registrar</span> <span class="hint">(en «Editar ficha»)</span>'],
       ['Cantidad recibida', isNum(m.quantity_received) ? `${fmtNum(m.quantity_received)} ${esc(m.unit)}` : '—'],
       ['Stock actual', `<span class="${stockClass(m)}">${fmtNum(m.quantity)} ${esc(m.unit)}</span>${isNum(m.min_stock) ? ` (mínimo ${fmtNum(m.min_stock)} ${esc(m.unit)})` : ''}`],
       ['Caducidad', `${fmtDay(m.expiry)}${expired ? ' <span class="bad">caducado</span>' : ''}`],
@@ -95,16 +131,22 @@ async function viewMaterial(id) {
     ${totalLine}
     <div class="actions spaced"><a class="btn secondary small" href="#materias--${esc(m.uuid)}--editar">Editar ficha</a></div>
   </div>
-  <section><h2>Especificaciones</h2><div class="panel">${facts([
+  <section><h2>Especificaciones (anexo III)</h2><div class="panel">${facts([
+    ['Origen', SPEC_SOURCES[m.spec_source] ? `${esc(SPEC_SOURCES[m.spec_source])}${m.spec_source === 'rfe' && m.spec_monograph_no ? ` · monografía n.º ${esc(m.spec_monograph_no)}` : ''}${m.spec_source === 'otra' && m.spec_pharmacopoeia ? ` · ${esc(m.spec_pharmacopoeia)}` : ''}` : '<span class="warn">Sin indicar</span>'],
     ['Monografía', val(m.monograph)],
+    ['Identificación', val(m.spec_identification)],
+    ['Impurezas', val(m.spec_impurities)],
+    ['Procedimientos analíticos', val(specMethods(m))],
     ['Conservación', val(m.storage)],
-    ['Precauciones', val(m.handling)],
+    ['Precauciones al manipular', val(m.handling)],
     ['Toxicidad y peligrosidad', val(m.toxicity)],
-  ])}${m.observations ? `<p class="pre spaced">${esc(m.observations)}</p>` : ''}</div></section>
+  ])}${specMissing(m).length ? `<p class="hint spaced">Falta: ${esc(specMissing(m).join(', '))}. Se completa en «Editar ficha».</p>` : ''}${m.observations ? `<p class="pre spaced">${esc(m.observations)}</p>` : ''}</div></section>
   ${await materialQcSection(m)}
   <section><h2>Decisión de aceptación o rechazo</h2>${statusButtons('material', m)}
-    <p class="hint">Al aceptar o rechazar, la decisión queda fechada y firmada con tu nombre en la ficha y en el registro de actividad.</p>
-    <p><a class="btn block secondary" href="#fichamp--${esc(m.uuid)}">${ICON.doc}Ficha de control de calidad en PDF (RD 175/2001)</a></p></section>
+    <p class="hint">Al aceptar o rechazar, la decisión queda fechada y firmada con tu nombre. Al aceptar se le da el nº de registro interno, que se anota en el registro y en la etiqueta del envase.</p>
+    ${m.status === 'rechazado' ? disposalForm(m) : ''}
+    ${m.status === 'aceptado' ? reviewBlock(m) : ''}
+    <p><a class="btn block secondary" href="#fichamp--${esc(m.uuid)}">${ICON.doc}Registro y especificaciones en PDF (${esc((await loadSettings()).fn.mp_code)})</a></p></section>
   <section><h2>Regularizar stock</h2>${stockAdjustForm('material', m)}</section>
   ${group && group.low ? `<p class="msg error">Stock bajo de ${esc(m.name)}: quedan ${fmtNum(group.total)} ${esc(group.unit)} y el mínimo es ${fmtNum(group.min)} ${esc(group.unit)}.</p>` : ''}
   ${await docsSection('material', m.uuid, ['boletin', 'fds', 'especificaciones', 'otro'], 'Boletín de análisis, ficha de seguridad y otros documentos')}
@@ -119,7 +161,7 @@ async function viewMaterial(id) {
   ${used.length ? `<section><h2>Usado en</h2><ul class="list">${used.map((p) => `<li><a class="row" href="#elaboraciones--${esc(p.uuid)}"><div class="row-main"><strong>${esc(p.lot || p.record_code)}</strong><span class="sub"><span>${esc(p.formula_name)}</span></span></div>${pill('production', p.status)}</a></li>`).join('')}</ul></section>` : ''}`;
 }
 
-/** Ensayos de control de calidad de un lote (RD 175/2001, apartado 3.2.3 y ficha 1). */
+/** Ensayos del control de conformidad de un lote (PN/L/PG/005/00, apartado 4.2). */
 function mpQcRow(t = {}) {
   return `<div class="mpqcrow" data-comp>
     <input type="text" name="mq_test" aria-label="Ensayo" placeholder="Ensayo" maxlength="120" value="${esc(t.test || '')}">
@@ -135,18 +177,41 @@ async function materialQcSection(m) {
   const s = await loadSettings();
   const qc = m.qc || {};
   const tests = qc.tests && qc.tests.length ? qc.tests : (s.mp_qc_tests || []).map((t) => ({ test: t }));
-  return `<section><h2>Control de calidad</h2><form class="panel form" data-form="materialQc" data-id="${esc(m.uuid)}" novalidate>
+  return `<section><h2>Control de conformidad</h2><form class="panel form" data-form="materialQc" data-id="${esc(m.uuid)}" novalidate>
     ${formMsg()}
+    <p class="hint">El lote debe cumplir sus especificaciones (anexo III). Anota los ensayos o comprobaciones hechos, por ejemplo la del boletín de análisis del proveedor.</p>
     <div data-rows="mpqc">${(tests.length ? tests : [{}]).map((t) => mpQcRow(t)).join('')}</div>
     <button type="button" class="btn secondary small" data-act="addRow" data-kind="mpqc">${ICON.plus}Añadir ensayo</button>
     <div class="grid2">
       ${field('Realizado por', text('qc_by', `value="${esc(qc.by ?? state.profile.name ?? '')}" maxlength="120"`))}
       ${field('Fecha del control', dateInput('qc_date', qc.date))}
     </div>
-    ${field('Descripción de los métodos analíticos', `<textarea name="qc_methods" maxlength="3000">${esc(qc.methods || '')}</textarea>`, 'Por ejemplo: según la monografía de la RFE, o comprobación del boletín de análisis del proveedor.')}
     ${field('Fecha de repetición del control analítico', dateInput('retest_date', m.retest_date), 'Solo si procede (en lugar de la caducidad).')}
-    <button class="btn secondary block" type="submit">Guardar control de calidad</button>
+    <button class="btn secondary block" type="submit">Guardar control de conformidad</button>
   </form></section>`;
+}
+/** Lote rechazado: devolución al proveedor o eliminación, que debe registrarse (PN/L/PG/005/00, 4.2). */
+function disposalForm(m) {
+  const d = m.disposal || {};
+  return `<form class="panel form spaced" data-form="materialDisposal" data-id="${esc(m.uuid)}" novalidate>
+    ${formMsg()}
+    <p class="sublabel">Destino del lote rechazado</p>
+    <div class="grid2">
+      ${field('Destino', `<select name="method">${options(['', ...Object.keys(DISPOSALS)], d.method || '', { '': 'Elegir', ...DISPOSALS })}</select>`)}
+      ${field('Fecha', dateInput('date', d.date || todayIso()))}
+    </div>
+    ${field('Detalle', text('detail', `value="${esc(d.detail || '')}" maxlength="200"`), 'Nº de albarán de devolución o método de eliminación según su peligrosidad.')}
+    <button class="btn secondary block" type="submit">Registrar el destino</button>
+    <p class="hint">Mientras tanto, mantenlo aparte y etiquetado como rechazado.</p>
+  </form>`;
+}
+/** Revisión anual del estado del producto por el farmacéutico (PN/L/PG/005/00, 4.3). */
+function reviewBlock(m) {
+  const r = lastReview(m);
+  return `<div class="panel stack spaced">
+    <p><strong>Revisión anual del estado:</strong> ${r ? `${fmtDay(r.date)} por ${esc(r.by)}` : 'sin registrar'}.</p>
+    <button class="btn secondary small" type="button" data-act="materialReview" data-id="${esc(m.uuid)}">Registrar revisión de hoy</button>
+  </div>`;
 }
 
 function viewMaterialFormHtml(m) {
@@ -185,14 +250,31 @@ function viewMaterialFormHtml(m) {
       </div>
       ${field('Código de artículo', text('code', `value="${esc(v.code || '')}" maxlength="80"`), 'Opcional: código del proveedor.')}
     </fieldset>
-    <fieldset class="group"><legend>Especificaciones</legend>
-      ${field('Monografía (RFE u otra farmacopea)', text('monograph', `value="${esc(v.monograph || '')}" maxlength="160"`), 'Por ejemplo: RFE nº 0435, o «especificaciones del proveedor».')}
+    <fieldset class="group"><legend>Inspección en la recepción</legend>
+      ${Object.entries(MP_RECEPTION_CHECKS).map(([k, label]) => checkbox(`rc_${k}`, esc(label), Boolean(v.reception && v.reception[k]))).join('')}
+      <div class="grid2">
+        ${field('Realizada por', text('rc_by', `value="${esc((v.reception && v.reception.by) ?? state.profile.name ?? '')}" maxlength="120"`))}
+        ${field('Fecha', dateInput('rc_date', (v.reception && v.reception.date) || v.received_date || todayIso()))}
+      </div>
+      <p class="hint">Si algo no es correcto, la materia prima no se registra: se devuelve al proveedor. Al registrarla queda en cuarentena, con la etiqueta original del proveedor.</p>
+    </fieldset>
+    <fieldset class="group"><legend>Especificaciones (anexo III)</legend>
+      <p class="hint" data-spec-copied hidden></p>
+      ${field('Origen de las especificaciones', `<select name="spec_source">${options(['', ...Object.keys(SPEC_SOURCES)], v.spec_source || '', { '': 'Elegir', ...SPEC_SOURCES })}</select>`, 'Por este orden: RFE; si no está, otra farmacopea de reconocido prestigio; y si no, las del fabricante o proveedor.')}
+      <div class="grid2">
+        ${field('Monografía n.º', text('spec_monograph_no', `value="${esc(v.spec_monograph_no || '')}" maxlength="40"`), 'Si cumple RFE.')}
+        ${field('Farmacopea', text('spec_pharmacopoeia', `value="${esc(v.spec_pharmacopoeia || '')}" maxlength="80"`), 'Si es otra (Ph. Eur., USP...).')}
+      </div>
+      ${field('Monografía', text('monograph', `value="${esc(v.monograph || '')}" maxlength="160"`), 'Título de la monografía o documento del proveedor.')}
+      ${field('Identificación', `<textarea name="spec_identification" maxlength="1500">${esc(v.spec_identification || '')}</textarea>`)}
+      ${field('Impurezas', `<textarea name="spec_impurities" maxlength="1500">${esc(v.spec_impurities || '')}</textarea>`)}
+      ${field('Descripción de los procedimientos analíticos', `<textarea name="spec_methods" maxlength="3000">${esc(specMethods(v))}</textarea>`)}
       ${field('Condiciones de conservación', text('storage', `value="${esc(v.storage || '')}" maxlength="200"`))}
       ${field('Precauciones al manipular', `<textarea name="handling" maxlength="1000">${esc(v.handling || '')}</textarea>`)}
       ${field('Toxicidad y peligrosidad', `<textarea name="toxicity" maxlength="1000">${esc(v.toxicity || '')}</textarea>`)}
     </fieldset>
-    ${field('Observaciones', `<textarea name="observations" maxlength="2000">${esc(v.observations || '')}</textarea>`, 'Incluida la revisión anual del estado del producto.')}
-    ${m ? '' : field('Estado', `<select name="status">${options(Object.keys(STATUS.material), 'cuarentena', STATUS.material)}</select>`, 'Tras la recepción queda en cuarentena hasta la decisión del farmacéutico.')}
+    ${field('Observaciones', `<textarea name="observations" maxlength="2000">${esc(v.observations || '')}</textarea>`, 'Aparecen en el registro de materias primas.')}
+    ${m ? '' : '<p class="hint">Se registra en cuarentena hasta la decisión del farmacéutico.</p>'}
     <button class="btn block" type="submit">${m ? 'Guardar cambios' : 'Registrar lote'}</button>
   </form>`;
 }
@@ -248,19 +330,27 @@ Object.assign(FORMS, {
     if (quantity === null || quantity < 0) throw new InputError('Indica la cantidad.');
     const minStock = parseNum(d.min_stock, 'Stock mínimo');
     const containers = intOrNull(d.containers, 'Nº de envases');
+    const reception = {
+      ...Object.fromEntries(Object.keys(MP_RECEPTION_CHECKS).map((k) => [k, d[`rc_${k}`] === 'on'])),
+      by: str(d.rc_by).slice(0, 120), date: isDay(d.rc_date) ? d.rc_date : null,
+    };
+    if (!prev && !inspectionDone(reception)) throw new InputError('Marca las tres comprobaciones de la recepción. Si alguna no se cumple, la materia prima no se registra: se devuelve al proveedor.');
     if (d.pack_included === 'on' && !str(d.pack_desc)) throw new InputError('Describe el envase que sirve de acondicionamiento (por ejemplo: frasco de plástico de 100 ml con aplicadores).');
     await uniqueInternal('material', internal, prev && prev.uuid);
     if (code && (await getAll('material')).some((m) => m.uuid !== (prev && prev.uuid) && m.code && lc(m.code) === lc(code) && lc(m.lot) === lc(lot))) {
       throw new InputError('Ya existe ese código de artículo con el mismo lote.');
     }
     const rec = {
-      ...(prev || { uuid: newId(), status: STATUS.material[d.status] ? d.status : 'cuarentena', quantity_received: quantity }),
+      ...(prev || { uuid: newId(), status: 'cuarentena', quantity_received: quantity }),
       name: name.slice(0, 160), kind: KIND_LABELS[d.kind] ? d.kind : 'excipiente', edo: d.edo === 'on', internal_no: internal.slice(0, 40),
       pack_included: d.pack_included === 'on', pack_desc: d.pack_included === 'on' ? str(d.pack_desc).slice(0, 160) : '',
       supplier: str(d.supplier).slice(0, 160), lot: lot.slice(0, 100), qc_no: str(d.qc_no).slice(0, 80),
       received_date: isDay(d.received_date) ? d.received_date : null, containers,
       quantity, unit: MATERIAL_UNITS.includes(d.unit) ? d.unit : 'g', min_stock: minStock,
       expiry: isDay(d.expiry) ? d.expiry : null, code: code.slice(0, 80),
+      reception,
+      spec_source: SPEC_SOURCES[d.spec_source] ? d.spec_source : '', spec_monograph_no: str(d.spec_monograph_no).slice(0, 40), spec_pharmacopoeia: str(d.spec_pharmacopoeia).slice(0, 80),
+      spec_identification: str(d.spec_identification).slice(0, 1500), spec_impurities: str(d.spec_impurities).slice(0, 1500), spec_methods: str(d.spec_methods).slice(0, 3000),
       monograph: str(d.monograph).slice(0, 160), storage: str(d.storage).slice(0, 200),
       handling: str(d.handling).slice(0, 1000), toxicity: str(d.toxicity).slice(0, 1000), observations: str(d.observations).slice(0, 2000),
     };
@@ -279,12 +369,12 @@ Object.assign(FORMS, {
         .filter((t) => t.test || t.result || t.method),
       by: str(all.get('qc_by')).slice(0, 120),
       date: isDay(all.get('qc_date')) ? all.get('qc_date') : null,
-      methods: str(all.get('qc_methods')).slice(0, 3000),
+      methods: (m.qc && m.qc.methods) || '',   // desde la v0.3.14 los procedimientos analíticos van en las especificaciones
     };
     m.retest_date = isDay(all.get('retest_date')) ? all.get('retest_date') : null;
     if (m.qc.tests.some((t) => t.result && t.ok === null)) throw new InputError('Indica si cada ensayo con resultado es conforme o no.');
     await save('material', m, 'control_calidad_materia_prima', `${m.name} / ${m.lot}: ${m.qc.tests.filter((t) => t.result).length} ensayos`);
-    toast('Control de calidad guardado.');
+    toast('Control de conformidad guardado.');
     await route();
   },
 
@@ -309,23 +399,97 @@ Object.assign(FORMS, {
 STATUS_CHECKS.material = async (m, status) => {
   if (!['aceptado', 'rechazado'].includes(status)) return null;
   if (status === 'rechazado') {
-    return { title: 'Rechazar materia prima', message: `Se registrará el rechazo de ${m.name} (lote ${m.lot}) con fecha de hoy y a tu nombre. Debe devolverse al proveedor o eliminarse, y mantenerse aparte mientras tanto.`, confirmLabel: 'Rechazar', danger: true };
+    return { title: 'Rechazar materia prima', message: `Se registrará el rechazo de ${m.name} (lote ${m.lot}) con fecha de hoy y a tu nombre. Debe devolverse al proveedor o eliminarse lo antes posible, y mantenerse aparte y etiquetada mientras tanto. Después registra su destino.`, confirmLabel: 'Rechazar', danger: true };
   }
+  // PN/L/PG/005/00, 4.2: al aceptarla se le da el nº de registro interno (si aún no lo tiene).
+  const proposed = m.internal_no ? '' : nextInternalNo(await getAll('material'));
   const missing = [];
-  if (!m.internal_no) missing.push('el nº de registro interno');
+  if (!m.internal_no && !proposed) missing.push('el nº de registro interno');
+  if (!inspectionDone(m.reception)) missing.push('la inspección en la recepción');
   const hasBulletin = (await docsOf(m.uuid)).some((f) => f.kind === 'boletin');
   if (!m.qc_no && !hasBulletin) missing.push('el nº de control de calidad o el boletín de análisis');
-  if (!((m.qc && m.qc.tests) || []).some((t) => t.result)) missing.push('los resultados del control de calidad');
+  if (specMissing(m).length) missing.push(`las especificaciones (${specMissing(m).join(', ')})`);
+  if (!((m.qc && m.qc.tests) || []).some((t) => t.result)) missing.push('el resultado del control de conformidad');
   if (((m.qc && m.qc.tests) || []).some((t) => t.ok === false)) missing.push('que todos los ensayos sean conformes (hay alguno no conforme)');
   if (isDay(m.expiry) && daysUntil(m.expiry) < 0) missing.push('una caducidad vigente (el lote está caducado)');
+  const numberLine = proposed ? `\n\nSe le asigna el nº de registro interno ${proposed}: anótalo en la etiqueta del envase. Se puede cambiar en «Editar ficha».` : '';
   return {
     title: 'Aceptar materia prima',
     message: missing.length
-      ? `Falta ${missing.join(', ')}. Sin el boletín de análisis la materia prima debería seguir en cuarentena.\n\n¿Aceptarla igualmente?`
-      : `Se registrará la aceptación de ${m.name} (lote ${m.lot}) con fecha de hoy y a tu nombre.`,
+      ? `Falta ${missing.join('; ')}. Mientras no se compruebe que cumple sus especificaciones, debería seguir en cuarentena.${numberLine}\n\n¿Aceptarla igualmente?`
+      : `Se registrará la aceptación de ${m.name} (lote ${m.lot}) con fecha de hoy y a tu nombre.${numberLine}`,
     confirmLabel: missing.length ? 'Aceptar igualmente' : 'Aceptar',
+    apply: proposed ? (rec) => { rec.internal_no = proposed; } : null,
   };
 };
+
+// Lotes aceptados con existencias cuyo estado no se ha revisado en el último año (PN/L/PG/005/00, 4.3).
+ALERT_SOURCES.push(async () => {
+  const year = 365 * 864e5;
+  const due = (await getAll('material')).filter((m) => {
+    if (m.status !== 'aceptado' || !(m.quantity > 0)) return false;
+    const r = lastReview(m);
+    const since = Date.parse((r && r.date) || m.decision_date || m.received_date || m.created_at);
+    return Number.isFinite(since) && Date.now() - since > year;
+  });
+  if (!due.length) return [];
+  return [{
+    tone: 'amber', kind: 'Revisión anual', title: `${due.length} ${due.length === 1 ? 'lote de materia prima' : 'lotes de materias primas'} sin revisar en el último año`,
+    text: `El farmacéutico debe evaluar su estado al menos una vez al año: ${due.slice(0, 4).map((m) => `${m.name} (${m.lot})`).join(', ')}${due.length > 4 ? '…' : ''}.`,
+    href: due.length === 1 ? `#materias--${due[0].uuid}` : '#materias',
+  }];
+});
+
+// Lote nuevo de un producto ya registrado: se copian sus especificaciones (anexo III), que son del producto.
+const SPEC_FIELDS = ['spec_source', 'spec_monograph_no', 'spec_pharmacopoeia', 'monograph', 'spec_identification', 'spec_impurities', 'spec_methods', 'storage', 'handling', 'toxicity'];
+CHANGE_HOOKS.push(async (t) => {
+  const form = t.form;
+  if (!form || !form.matches('form[data-form="material"]:not([data-id])') || t.name !== 'name') return;
+  if (SPEC_FIELDS.some((k) => str(form.elements[k].value))) return;
+  const prev = (await getAll('material')).filter((m) => fold(m.name) === fold(t.value) && SPEC_FIELDS.some((k) => str(k === 'spec_methods' ? specMethods(m) : m[k])))
+    .sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')))[0];
+  if (!prev) return;
+  SPEC_FIELDS.forEach((k) => { form.elements[k].value = k === 'spec_methods' ? specMethods(prev) : (prev[k] || ''); });
+  if (KIND_LABELS[prev.kind]) form.elements.kind.value = prev.kind;
+  if (MATERIAL_UNITS.includes(prev.unit)) form.elements.unit.value = prev.unit;
+  const note = $('[data-spec-copied]', form);
+  if (note) { note.textContent = `Especificaciones copiadas del lote ${prev.lot}. Revísalas por si han cambiado.`; note.hidden = false; }
+});
+
+Object.assign(ACTIONS, {
+  materialReview: async (el) => {
+    const m = await getOne('material', el.dataset.id);
+    if (!m) return;
+    const ok = await ask({
+      title: 'Revisión anual',
+      message: `Confirma que has revisado el estado de ${m.name} (lote ${m.lot}): aspecto, envase cerrado y sin daños, etiquetado legible, condiciones de conservación y caducidad.`,
+      confirmLabel: 'Registrar revisión',
+    });
+    if (!ok) return;
+    m.reviews = [...(Array.isArray(m.reviews) ? m.reviews : []), { date: todayIso(), by: state.profile.name }].slice(-20);
+    await save('material', m, 'revision_anual_materia_prima', `${m.name} / ${m.lot}`);
+    toast('Revisión registrada.');
+    await route();
+  },
+});
+Object.assign(FORMS, {
+  async materialDisposal(form) {
+    const m = await getOne('material', form.dataset.id);
+    if (!m || m.status !== 'rechazado') throw new InputError('Solo se registra el destino de un lote rechazado.');
+    const d = formData(form);
+    if (!DISPOSALS[d.method]) throw new InputError('Indica si se ha devuelto al proveedor o se ha eliminado.');
+    if (!isDay(d.date)) throw new InputError('Indica la fecha.');
+    m.disposal = { method: d.method, date: d.date, detail: str(d.detail).slice(0, 200), by: state.profile.name };
+    await save('material', m, 'destino_rechazo_materia_prima', `${m.name} / ${m.lot}: ${lc(DISPOSALS[d.method])} el ${fmtDay(d.date)}`);
+    toast('Destino registrado.');
+    await route();
+  },
+});
+Object.assign(ACTION_LABELS, {
+  revision_anual_materia_prima: 'Revisión anual de materia prima',
+  destino_rechazo_materia_prima: 'Destino de materia prima rechazada',
+  registro_mp_generado: 'Registro de materias primas generado',
+});
 
 // ------------------------------------------------------------------ Material de acondicionamiento
 async function viewPackagings() {
