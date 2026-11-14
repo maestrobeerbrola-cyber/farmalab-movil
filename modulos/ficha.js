@@ -87,302 +87,69 @@ async function recordSheetData(p, extra) {
   };
 }
 
-/**
- * Motor de maquetación de las fichas en A4 (pdf-lib, Helvetica): cabecera con la farmacia y el título,
- * rejillas de datos, tablas que continúan en la página siguiente, recuadro de conformidad y firma, y pie numerado.
+/*
+ * Ficha 2: guía de elaboración, control y registro de una fórmula magistral o preparado oficinal
+ * (RD 175/2001, capítulo III), con la estética de los registros del Formulario Nacional:
+ * cabecera de procedimiento, celdas azules con su etiqueta y celdas blancas con el dato.
  */
-async function createSheet({ title, subtitle, tag, running, footer, pharmacy, draftMissing = [] }) {
-  const { PDFDocument, StandardFonts, rgb } = await loadPdfLib();
-  const doc = await PDFDocument.create();
-  doc.setTitle(running);
-  doc.setSubject(`${title} (RD 175/2001)`);
-  doc.setCreator('FARMA·LAB');
-  doc.setProducer('FARMA·LAB');
-  const font = await doc.embedFont(StandardFonts.Helvetica);
-  const bold = await doc.embedFont(StandardFonts.HelveticaBold);
-  const charset = new Set(font.getCharacterSet());
-  const clean = (t) => [...pdfSymbols(t).replace(/[^\S\n]+/g, ' ')]
-    .map((ch) => (ch === '\n' || charset.has(ch.codePointAt(0)) ? ch : '?')).join('').trim();
-  const mm = (v) => (v * 72) / 25.4;
-  const W = mm(210); const H = mm(297); const M = mm(16); const CW = W - 2 * M;
-  const FOOT = mm(12);
-  const C = {
-    ink: rgb(0.106, 0.165, 0.227), muted: rgb(0.345, 0.408, 0.467), accent: rgb(0.039, 0.361, 0.255),
-    line: rgb(0.82, 0.86, 0.85), band: rgb(0.925, 0.957, 0.945), head: rgb(0.953, 0.965, 0.961),
-    warn: rgb(0.52, 0.31, 0.04), warnBg: rgb(0.984, 0.933, 0.835), bad: rgb(0.64, 0.14, 0.11),
-  };
-  const pages = [];
-  let page; let y;
-  const newPage = () => {
-    page = doc.addPage([W, H]);
-    pages.push(page);
-    y = H - M;
-    if (pages.length > 1) {
-      page.drawText(clean(running), { x: M, y: y - 8, size: 8, font: bold, color: C.muted });
-      y -= 14;
-      page.drawLine({ start: { x: M, y }, end: { x: W - M, y }, thickness: 0.5, color: C.line });
-      y -= 8;
-    }
-  };
-  const room = (h) => y - h >= M + FOOT;
-  const ensure = (h) => { if (!room(h)) newPage(); };
-
-  const wrap = (f, size, value, width) => {
-    const out = [];
-    for (const para of clean(value).split('\n')) {
-      let line = '';
-      for (const word of para.split(' ')) {
-        let w = word;
-        while (f.widthOfTextAtSize(w, size) > width && w.length > 1) {   // palabras más largas que la columna
-          let cut = w.length - 1;
-          while (cut > 1 && f.widthOfTextAtSize(w.slice(0, cut), size) > width) cut -= 1;
-          if (line) { out.push(line); line = ''; }
-          out.push(w.slice(0, cut));
-          w = w.slice(cut);
-        }
-        const next = line ? `${line} ${w}` : w;
-        if (!line || f.widthOfTextAtSize(next, size) <= width) line = next; else { out.push(line); line = w; }
-      }
-      out.push(line);
-    }
-    return out;
-  };
-  const paragraph = (value, { f = font, size = 9.2, color = C.ink, lh = 1.32 } = {}) => {
-    for (const ln of wrap(f, size, value, CW)) {
-      ensure(size * lh);
-      y -= size * lh;
-      page.drawText(ln, { x: M, y: y + size * 0.26, size, font: f, color });
-    }
-  };
-  /** Título de apartado; keep = espacio mínimo para que no quede solo al pie de la página. */
-  const section = (name, keep = mm(12)) => {
-    ensure(mm(14) + keep);
-    y -= mm(4.2);
-    page.drawText(clean(name), { x: M, y: y - 10, size: 10.5, font: bold, color: C.accent });
-    y -= 14;
-    page.drawLine({ start: { x: M, y }, end: { x: W - M, y }, thickness: 0.7, color: C.accent });
-    y -= mm(2);
-  };
-
-  /** Rejilla de datos: etiqueta pequeña arriba y valor debajo. Un valor vacío deja una línea para escribir a mano. */
-  const grid = (cells, cols, { bg = null, pad = 0 } = {}) => {
-    const gap = mm(4);
-    const colW = (CW - 2 * pad - gap * (cols - 1)) / cols;
-    const rows = [];
-    let i = 0;
-    const list = cells.filter(Boolean);
-    while (i < list.length) {
-      const row = [];
-      let used = 0;
-      while (i < list.length && used + (list[i].span || 1) <= cols) { row.push(list[i]); used += list[i].span || 1; i += 1; }
-      const laid = row.map((c) => {
-        const w = colW * (c.span || 1) + gap * ((c.span || 1) - 1);
-        const size = c.big ? 15 : 9.4;
-        const lines = c.value === '' ? [] : wrap(c.big || c.strong ? bold : font, size, c.value, w);
-        return { ...c, w, size, lines, h: 11 + (c.value === '' ? 16 : lines.length * size * 1.28) };
-      });
-      rows.push({ laid, h: Math.max(...laid.map((c) => c.h)) + mm(2.2) });
-    }
-    const total = rows.reduce((n, r) => n + r.h, 0) + 2 * pad;
-    if (bg && total < H - 2 * M - FOOT) ensure(total);
-    if (bg) page.drawRectangle({ x: M, y: y - total, width: CW, height: total, color: bg });
-    y -= pad;
-    for (const r of rows) {
-      ensure(r.h);
-      let x = M + pad;
-      for (const c of r.laid) {
-        page.drawText(clean(c.label), { x, y: y - 8, size: 7.4, font: bold, color: C.muted });
-        let ty = y - 11;
-        if (c.value === '') {
-          page.drawLine({ start: { x, y: ty - 13 }, end: { x: x + c.w, y: ty - 13 }, thickness: 0.6, color: C.line, dashArray: [2, 2] });
-        } else {
-          for (const ln of c.lines) {
-            ty -= c.size * 1.28;
-            page.drawText(ln, { x, y: ty + c.size * 0.26, size: c.size, font: c.big || c.strong ? bold : font, color: c.big ? C.accent : c.bad ? C.bad : C.ink });
-          }
-        }
-        x += c.w + gap;
-      }
-      y -= r.h;
-    }
-    y -= pad;
-  };
-
-  /** Tabla con cabecera sombreada que se repite si salta de página. */
-  const table = (cols, rows) => {
-    const widths = cols.map((c) => c.w * CW);
-    const cp = 4; const size = 8.8;
-    const header = () => {
-      const lines = cols.map((c, i) => wrap(bold, 7.6, c.title, widths[i] - 2 * cp));
-      const h = Math.max(...lines.map((l) => l.length)) * 7.6 * 1.25 + 2 * cp;
-      ensure(h + 18);
-      page.drawRectangle({ x: M, y: y - h, width: CW, height: h, color: C.head });
-      let x = M;
-      lines.forEach((ls, i) => {
-        ls.forEach((ln, k) => {
-          const tw = bold.widthOfTextAtSize(ln, 7.6);
-          const tx = cols[i].right ? x + widths[i] - cp - tw : x + cp;
-          page.drawText(ln, { x: tx, y: y - cp - (k + 1) * 7.6 * 1.25 + 2, size: 7.6, font: bold, color: C.muted });
-        });
-        x += widths[i];
-      });
-      y -= h;
-    };
-    header();
-    const body = rows.length ? rows : [cols.map((_, i) => (i === 0 ? 'Sin registros' : ''))];
-    for (const row of body) {
-      const lines = row.map((v, i) => wrap(font, size, v, widths[i] - 2 * cp));
-      const h = Math.max(...lines.map((l) => l.length)) * size * 1.28 + 2 * cp;
-      if (!room(h)) { newPage(); header(); }
-      let x = M;
-      lines.forEach((ls, i) => {
-        ls.forEach((ln, k) => {
-          const tw = font.widthOfTextAtSize(ln, size);
-          const tx = cols[i].right ? x + widths[i] - cp - tw : x + cp;
-          page.drawText(ln, { x: tx, y: y - cp - (k + 1) * size * 1.28 + size * 0.3, size, font, color: rows.length ? C.ink : C.muted });
-        });
-        x += widths[i];
-      });
-      y -= h;
-      page.drawLine({ start: { x: M, y }, end: { x: W - M, y }, thickness: 0.5, color: C.line });
-    }
-  };
-
-  /** Recuadro final: decisión a la izquierda, fecha y firma del farmacéutico responsable a la derecha. */
-  const signature = ({ decision, rejected = false, signer = '' }) => {
-    const boxH = mm(30);
-    ensure(boxH + mm(8));
-    y -= mm(6);
-    const half = CW / 2;
-    page.drawRectangle({ x: M, y: y - boxH, width: CW, height: boxH, borderColor: C.ink, borderWidth: 0.8 });
-    page.drawLine({ start: { x: M + half, y }, end: { x: M + half, y: y - boxH }, thickness: 0.8, color: C.ink });
-    page.drawText('Conformidad', { x: M + mm(4), y: y - mm(4) - 7, size: 7.6, font: bold, color: C.muted });
-    wrap(bold, 10, decision, half - mm(8)).forEach((ln, k) => {
-      page.drawText(ln, { x: M + mm(4), y: y - mm(10) - 10 - k * 13, size: 10, font: bold, color: rejected ? C.bad : C.ink });
-    });
-    page.drawText('Fecha y firma del farmacéutico responsable', { x: M + half + mm(4), y: y - mm(4) - 7, size: 7.6, font: bold, color: C.muted });
-    const signY = y - boxH + mm(9);
-    page.drawLine({ start: { x: M + half + mm(4), y: signY }, end: { x: W - M - mm(4), y: signY }, thickness: 0.6, color: C.line });
-    const who = clean(signer);
-    if (who) page.drawText(who, { x: M + half + mm(4), y: signY - 11, size: 8.4, font, color: C.muted });
-    y -= boxH;
-  };
-
-  const finish = async () => {
-    const stamp = new Date().toLocaleString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-    pages.forEach((pg, i) => {
-      pg.drawLine({ start: { x: M, y: M + mm(5) }, end: { x: W - M, y: M + mm(5) }, thickness: 0.5, color: C.line });
-      pg.drawText(clean(`${footer}${draftMissing.length ? ' · BORRADOR' : ''}`), { x: M, y: M, size: 7.4, font, color: C.muted });
-      const right = clean(`Página ${i + 1} de ${pages.length} · Generada el ${stamp}`);
-      pg.drawText(right, { x: W - M - font.widthOfTextAtSize(right, 7.4), y: M, size: 7.4, font, color: C.muted });
-    });
-    return new Blob([await doc.save()], { type: 'application/pdf' });
-  };
-
-  // ---------------- cabecera de la primera página
-  newPage();
-  const ph = pharmacy || {};
-  page.drawText(clean(ph.name || 'Oficina de farmacia'), { x: M, y: y - 10, size: 10.5, font: bold, color: C.ink });
-  page.drawText(clean(tag), { x: W - M - font.widthOfTextAtSize(clean(tag), 8), y: y - 9, size: 8, font, color: C.muted });
-  y -= 13;
-  const contact = clean([ph.address, ph.phone && `Tel. ${ph.phone}`].filter(Boolean).join(' · '));
-  if (contact) { page.drawText(contact, { x: M, y: y - 9, size: 8.2, font, color: C.muted }); y -= 11; }
-  y -= mm(5);
-  const titleSize = bold.widthOfTextAtSize(clean(title), 18) > CW ? 15 : 18;
-  page.drawText(clean(title), { x: M, y: y - titleSize, size: titleSize, font: bold, color: C.ink });
-  y -= titleSize + 5;
-  if (subtitle) { page.drawText(clean(subtitle), { x: M, y: y - 10, size: 9.5, font, color: C.muted }); }
-  y -= mm(7);
-  if (draftMissing.length) {
-    const lines = wrap(font, 8.6, `Faltan datos: ${draftMissing.join(', ')}.`, CW - mm(8));
-    const h = 14 + lines.length * 8.6 * 1.3 + mm(3);
-    page.drawRectangle({ x: M, y: y - h, width: CW, height: h, color: C.warnBg });
-    page.drawText('Borrador: ficha incompleta', { x: M + mm(4), y: y - mm(2) - 9, size: 9.5, font: bold, color: C.warn });
-    let ty = y - mm(2) - 12;
-    lines.forEach((ln) => { ty -= 8.6 * 1.3; page.drawText(ln, { x: M + mm(4), y: ty + 2.2, size: 8.6, font, color: C.warn }); });
-    y -= h + mm(4);
-  }
-  const gap = (v) => { y -= v; };
-  return { mm, C, bold, grid, table, paragraph, section, signature, finish, gap };
-}
-
-/** Ficha 2: guía de elaboración, control y registro de una fórmula magistral. */
+const RECORD_TITLE = { fm: 'Guía de elaboración, control\ny registro de fórmula magistral', oficinal: 'Guía de elaboración, control\ny registro de preparado oficinal' };
 async function buildRecordSheetPdf(p, d, s, draftMissing) {
-  const sh = await createSheet({
-    title: 'Ficha de registro de formulación magistral', subtitle: 'Guía de elaboración, control y registro', tag: 'RD 175/2001 · Ficha 2',
-    running: `Ficha de registro de formulación magistral · Lote ${p.lot}`, footer: `FARMA·LAB · Lote ${p.lot}`, pharmacy: s.pharmacy, draftMissing,
+  const po = p.formula_type === 'oficinal';
+  const related = [...(p.pnt_refs || []).map((r) => r.code).filter(Boolean), str(s.fn.guide_related)].filter(Boolean).join(', ');
+  const sh = await createFnSheet({
+    code: s.fn.guide_code, related, procTitle: po ? RECORD_TITLE.oficinal : RECORD_TITLE.fm, pharmacy: s.pharmacy,
+    subject: `Ficha de registro ${p.lot} · ${p.formula_name}`, draftMissing,
   });
-  const { mm, C, bold } = sh;
-  sh.grid([
-    { label: 'Registro / Lote', value: p.lot, big: true, span: 2 },
-    { label: 'Registro de elaboración', value: p.record_code },
-    { label: 'Nombre', value: d.name, strong: true, span: 3 },
-    { label: 'Tipo', value: d.type },
-    { label: 'Forma farmacéutica', value: p.form || '—' },
-    { label: 'Vía de administración', value: p.route || '—' },
-    { label: 'Cantidad elaborada', value: `${fmtNum(p.target_amount)} ${p.unit}` },
-    { label: 'Fecha de elaboración', value: fmtDay(p.elaborated_date) },
-    { label: 'Fecha de caducidad', value: fmtDay(p.expiry_date) },
-    p.cn && p.cn.cn ? { label: 'Código nacional', value: p.cn.cn } : null,
-    { label: 'Condiciones de conservación', value: p.storage || '—', span: p.cn && p.cn.cn ? 2 : 3 },
-  ], 3, { bg: C.band, pad: mm(4) });
-
-  sh.section('Composición');
-  sh.paragraph(d.composition);
-
-  sh.section('Modus operandi');
-  if (d.pnts.length) d.pnts.forEach((t) => sh.paragraph(t, { f: bold, size: 9 }));
-  if (d.method) { if (d.pnts.length) sh.gap(3); sh.paragraph(d.method); }
-  if (!d.pnts.length && !d.method) sh.paragraph('—', { color: C.muted });
-
-  sh.section('Utillaje utilizado');
-  sh.paragraph(d.equipment || '—', { color: d.equipment ? C.ink : C.muted });
-
-  sh.section('Datos de las materias primas', mm(22));
+  const L = (from, to, label) => ({ from, to, label });
+  const V = (from, to, value, extra = {}) => ({ from, to, value: str(value) || '—', ...extra });
+  const pair = (a, b, c, e) => [L(0, 0.18, a), V(0.18, 0.5, b), L(0.5, 0.68, c), V(0.68, 1, e)];
+  sh.heading('FICHA 2', po ? 'Registro de preparado oficinal' : 'Registro de formulación magistral');
+  sh.draft();
+  sh.form([
+    { h: 24, cells: [L(0, 0.18, 'Número de registro / lote'), V(0.18, 0.5, p.lot, { strong: true }), L(0.5, 0.68, 'Registro de elaboración'), V(0.68, 1, p.record_code)] },
+    { h: 22, cells: [L(0, 0.18, po ? 'Nombre del preparado' : 'Nombre de la fórmula'), V(0.18, 1, d.name, { strong: true })] },
+    { h: 18, cells: pair('Tipo', d.type, 'Forma farmacéutica', p.form) },
+    { h: 18, cells: pair('Vía de administración', p.route, 'Cantidad preparada', `${fmtNum(p.target_amount)} ${p.unit}`) },
+    { h: 18, cells: pair('Fecha de elaboración', fmtDay(p.elaborated_date), 'Fecha de caducidad', fmtDay(p.expiry_date)) },
+    { h: 18, cells: pair('Condiciones de conservación', p.storage, 'Código nacional', p.cn && p.cn.cn) },
+  ], { gap: 7 });
+  sh.block('Composición', d.composition);
+  sh.block('Modus operandi', [...d.pnts, d.method].filter(Boolean).join('\n'));
+  sh.section('Datos de las materias primas');
   sh.table([
-    { title: 'Principios activos / Excipientes', w: 0.29 },
-    { title: 'Nº control o lote', w: 0.22 },
-    { title: 'Proveedor', w: 0.17 },
-    { title: 'Cantidad teórica', w: 0.11, right: true },
-    { title: 'Cantidad pesada', w: 0.11, right: true },
-    { title: 'Unidad', w: 0.10 },
-  ], d.materials);
-  sh.gap(3);
-  sh.paragraph('PA: principio activo · EDO: excipiente de declaración obligatoria', { size: 7.4, color: C.muted });
-
-  sh.section('Datos del material de acondicionamiento', mm(18));
-  sh.table([{ title: 'Tipo', w: 0.55 }, { title: 'Nº control o lote', w: 0.30 }, { title: 'Unidades', w: 0.15, right: true }], d.packaging);
-
-  sh.section('Personal elaborador', mm(14));
-  sh.grid([{ label: 'Farmacéutico/s', value: d.pharmacists }, { label: 'Auxiliares (nombre y apellidos)', value: d.assistants || '—' }], 2);
-
-  sh.section('Control de calidad', mm(24));
-  sh.table([{ title: 'Prueba realizada', w: 0.38 }, { title: 'Resultado', w: 0.47 }, { title: 'Conforme', w: 0.15 }], d.qcTests);
-  sh.gap(mm(2));
-  sh.grid([
-    { label: 'Número de control', value: p.record_code },
-    { label: 'Realizado por', value: d.qcBy || '—' },
-    { label: 'Fecha de caducidad', value: fmtDay(p.expiry_date) },
-    { label: 'Aparataje', value: d.qcApparatus || '—' },
-    { label: 'Reactivos y su lote', value: d.qcReagents || '—', span: 2 },
-  ], 3);
-
-  sh.section('Datos de dispensación', mm(26));
-  sh.grid([
-    { label: 'Nº de registro del Libro Recetario', value: d.recetario },
-    { label: 'Fecha de dispensación', value: d.dispensedDate },
-    { label: 'Cantidad dispensada', value: d.dispensedQty },
-    { label: 'Facultativo prescriptor', value: d.prescriber, span: 2 },
-    { label: 'Paciente', value: d.patient },
-  ], 3);
-
-  sh.section('Observaciones');
-  sh.paragraph(d.notes || '—', { color: d.notes ? C.ink : C.muted });
-
-  sh.signature({
-    decision: d.decision, rejected: p.decision === 'rechazada',
-    signer: [s.pharmacy.pharmacist || p.decision_by, d.decisionDate && `Fecha: ${d.decisionDate}`].filter(Boolean).join(' · '),
-  });
+    { title: 'Principios activos / Excipientes', w: 0.3 }, { title: 'Nº de control o lote', w: 0.22 }, { title: 'Proveedor', w: 0.18 },
+    { title: 'Cantidad teórica', w: 0.11, right: true }, { title: 'Cantidad pesada', w: 0.11, right: true }, { title: 'Unidad', w: 0.08 },
+  ], d.materials, { note: 'PA: principio activo · EDO: excipiente de declaración obligatoria' });
+  sh.section('Material de acondicionamiento');
+  sh.table([{ title: 'Tipo', w: 0.55 }, { title: 'Nº de control o lote', w: 0.3 }, { title: 'Unidades', w: 0.15, right: true }], d.packaging);
+  sh.section('Personal elaborador y utillaje');
+  sh.form([
+    { h: 18, cells: pair('Farmacéutico/s', d.pharmacists, 'Auxiliares', d.assistants) },
+    { h: 18, cells: [L(0, 0.18, 'Utillaje utilizado'), V(0.18, 1, d.equipment)] },
+  ], { gap: 7 });
+  sh.section('Control de calidad');
+  sh.table([{ title: 'Prueba realizada', w: 0.38 }, { title: 'Resultado', w: 0.47 }, { title: 'Conforme', w: 0.15 }], d.qcTests, { gap: 0 });
+  sh.form([
+    { h: 18, cells: pair('Realizado por', d.qcBy, 'Aparataje', d.qcApparatus) },
+    { h: 18, cells: [L(0, 0.18, 'Reactivos y su lote'), V(0.18, 1, d.qcReagents)] },
+  ], { gap: 7 });
+  sh.section('Datos de dispensación');
+  const blank = (v) => ({ from: v.from, to: v.to, value: v.value === '—' ? '' : v.value });   // en blanco para escribirlo a mano
+  sh.form([
+    { h: 20, cells: [L(0, 0.18, 'Nº del Libro Recetario'), blank(V(0.18, 0.5, d.recetario)), L(0.5, 0.68, 'Fecha de dispensación'), blank(V(0.68, 1, d.dispensedDate))] },
+    { h: 20, cells: [L(0, 0.18, 'Cantidad dispensada'), blank(V(0.18, 0.5, d.dispensedQty)), L(0.5, 0.68, 'Facultativo prescriptor'), blank(V(0.68, 1, d.prescriber))] },
+    { h: 20, cells: [L(0, 0.18, 'Paciente'), blank(V(0.18, 1, d.patient))] },
+  ], { gap: 6 });
+  sh.observations(d.notes || '', { minH: 22 });
+  const decided = ['aceptada', 'rechazada'].includes(p.decision);
+  sh.form([
+    { h: 15, cells: [L(0, 0.5, 'Decisión de aceptación o rechazo:'), L(0.5, 0.68, 'Fecha:'), L(0.68, 1, 'Firma del farmacéutico responsable:')] },
+    { h: 36, cells: [
+      { from: 0, to: 0.5, value: p.decision === 'aceptada' ? 'Aceptado' : p.decision === 'rechazada' ? 'Rechazado' : '' },
+      { from: 0.5, to: 0.68, value: decided ? fmtDay(p.decision_date) : '' },
+      { from: 0.68, to: 1, value: decided ? (s.pharmacy.pharmacist || p.decision_by || '') : '' },
+    ] },
+  ], { gap: 4, keep: true });
   return sh.finish();
 }
 
@@ -447,15 +214,17 @@ async function createFnSheet({ code, related, procTitle, pharmacy, subject, draf
   let page; let y;
   const LBL = 7; const VAL = 8.6; const PAD = 3.2;
   /** Celda: fondo azul con etiqueta blanca, o blanca con borde azul y su valor. */
-  const cell = (x, top, w, h, { label = '', value = '', center = false, middle = false, fill = null, box = false, mark = false, valueSize = VAL } = {}) => {
+  const cell = (x, top, w, h, { label = '', value = '', center = false, right = false, middle = false, fill = null, box = false, mark = false, valueSize = VAL, strong = false, sub = false } = {}) => {
     const isLabel = Boolean(label);
-    page.drawRectangle({ x, y: top - h, width: w, height: h, color: isLabel ? C.navy : (fill || C.white), borderColor: isLabel ? C.white : C.navy, borderWidth: isLabel ? 0.8 : 0.8 });
+    // sub: cabecera de columna en lila con texto oscuro (como «Temperatura» o «ºC» en los modelos)
+    page.drawRectangle({ x, y: top - h, width: w, height: h, color: isLabel ? (sub ? C.lilac : C.navy) : (fill || C.white), borderColor: isLabel ? C.white : C.navy, borderWidth: 0.8 });
     if (isLabel) {
       const ls = wrap(bold, LBL, label, w - 2 * PAD);
       const off = middle ? Math.max(0, (h - 2 * PAD - ls.length * LBL * 1.15) / 2) : 0;   // centrada en vertical, como en el anexo III
       ls.forEach((ln, k) => {
-        const tx = center ? x + (w - bold.widthOfTextAtSize(ln, LBL)) / 2 : x + PAD;
-        page.drawText(ln, { x: tx, y: top - PAD - off - (k + 1) * LBL * 1.15 + 1.5, size: LBL, font: bold, color: C.white });
+        const lw = bold.widthOfTextAtSize(ln, LBL);
+        const tx = center ? x + (w - lw) / 2 : right ? x + w - PAD - lw : x + PAD;
+        page.drawText(ln, { x: tx, y: top - PAD - off - (k + 1) * LBL * 1.15 + 1.5, size: LBL, font: bold, color: sub ? C.text : C.white });
       });
     } else if (box) {   // casilla
       const s = 8.5; const bx = x + (w - s) / 2; const by = top - h / 2 - s / 2;
@@ -465,10 +234,13 @@ async function createFnSheet({ code, related, procTitle, pharmacy, subject, draf
         page.drawLine({ start: { x: bx + 1.6, y: by + s - 1.6 }, end: { x: bx + s - 1.6, y: by + 1.6 }, thickness: 1.2, color: C.ink });
       }
     } else if (str(value)) {
-      const ls = wrap(font, valueSize, value, w - 2 * PAD);
+      const f = strong ? bold : font;
+      const size = strong ? valueSize + 1.4 : valueSize;
+      const ls = wrap(f, size, value, w - 2 * PAD);
       ls.forEach((ln, k) => {
-        const tx = center ? x + (w - font.widthOfTextAtSize(ln, valueSize)) / 2 : x + PAD;
-        page.drawText(ln, { x: tx, y: top - PAD - (k + 1) * valueSize * 1.22 + 2, size: valueSize, font, color: C.ink });
+        const lw = f.widthOfTextAtSize(ln, size);
+        const tx = center ? x + (w - lw) / 2 : right ? x + w - PAD - lw : x + PAD;
+        page.drawText(ln, { x: tx, y: top - PAD - (k + 1) * size * 1.22 + 2, size, font: f, color: C.ink });
       });
     }
   };
@@ -533,23 +305,74 @@ async function createFnSheet({ code, related, procTitle, pharmacy, subject, draf
    * Ficha del modelo: filas de celdas con su posición (fracciones del ancho) y su alto mínimo.
    * Cada celda es una etiqueta (fondo azul, texto blanco) o un valor (blanco, con borde azul).
    */
-  const form = (rows) => {
+  const form = (rows, { gap = mm(5) } = {}) => {
+    const heights = rows.map((r) => Math.max(r.h, ...r.cells.map((c) => {
+      const w = (c.to - c.from) * CW;
+      return c.label ? needLabel(c.label, w, 0) : need(c.value, w, 0, c.strong ? { f: bold, size: VAL + 1.4 } : {});
+    })));
+    if (!room(heights.reduce((a, b) => a + b, 0)) && y < H - mm(60)) newPage();   // la ficha no se parte entre páginas
     const top0 = y;
     let top = y;
-    for (const r of rows) {
-      const h = Math.max(r.h, ...r.cells.map((c) => {
-        const w = (c.to - c.from) * CW;
-        return c.label ? needLabel(c.label, w, 0) : need(c.value, w, 0);
-      }));
-      r.cells.forEach((c) => cell(M + c.from * CW, top, (c.to - c.from) * CW, h, c.label ? { label: c.label, middle: c.middle } : { value: c.value, center: c.center }));
+    rows.forEach((r, i) => {
+      const h = heights[i];
+      r.cells.forEach((c) => cell(M + c.from * CW, top, (c.to - c.from) * CW, h, c.label ? { label: c.label, middle: c.middle } : { value: c.value, center: c.center, strong: c.strong }));
       top -= h;
-    }
+    });
     page.drawRectangle({ x: M, y: top, width: CW, height: top0 - top, borderColor: C.navy, borderWidth: 0.9 });
-    y = top - mm(5);
+    y = top - gap;
+  };
+  /** Apartado: barra azul a todo el ancho con su título, sin quedarse sola al pie de la página. */
+  const section = (label, keep = 60) => {
+    if (!room(15 + keep)) newPage();
+    cell(M, y, CW, 15, { label });
+    y -= 15;
+  };
+  /** Apartado con un texto: barra azul y celda blanca debajo, que sigue en la página siguiente si no cabe. */
+  const block = (label, value, { gap = mm(2.5), minH = 22 } = {}) => {
+    section(label, 40);
+    const lh = VAL * 1.22;
+    let lines = wrap(font, VAL, str(value) || '—', CW - 2 * PAD);
+    while (lines.length) {
+      const fit = Math.max(1, Math.floor((y - M - FOOT - 2 * PAD) / lh));
+      const part = lines.slice(0, fit);
+      lines = lines.slice(fit);
+      const h = Math.max(lines.length ? 0 : minH, part.length * lh + 2 * PAD + 1);
+      page.drawRectangle({ x: M, y: y - h, width: CW, height: h, color: C.white, borderColor: C.navy, borderWidth: 0.9 });
+      part.forEach((ln, k) => page.drawText(ln, { x: M + PAD, y: y - PAD - (k + 1) * lh + 2, size: VAL, font, color: C.ink }));
+      y -= h;
+      if (lines.length) newPage();
+    }
+    y -= gap;
+  };
+  /** Tabla: cabecera lila con el nombre de cada columna y filas blancas; la cabecera se repite si sigue en otra página. */
+  const table = (cols, rows, { note = '', gap = mm(2.5), minRows = 1 } = {}) => {
+    const X = []; let acc = 0;
+    cols.forEach((c) => { X.push(M + acc * CW); acc += c.w; });
+    const Wc = cols.map((c) => c.w * CW);
+    const headH = Math.max(15, ...cols.map((c, i) => needLabel(c.title, Wc[i], 0)));
+    const head = () => { cols.forEach((c, i) => cell(X[i], y, Wc[i], headH, { label: c.title, sub: true, right: c.right })); y -= headH; };
+    const body = rows.length ? rows : Array.from({ length: minRows }, () => cols.map(() => ''));
+    head();
+    let segTop = y + headH;
+    body.forEach((r) => {
+      const h = Math.max(16, ...r.map((v, i) => need(v, Wc[i], 0)));
+      if (!room(h)) {
+        page.drawRectangle({ x: M, y, width: CW, height: segTop - y, borderColor: C.navy, borderWidth: 0.9 });
+        newPage();
+        segTop = y;
+        head();
+      }
+      r.forEach((v, i) => cell(X[i], y, Wc[i], h, { value: v, right: cols[i].right }));
+      y -= h;
+    });
+    page.drawRectangle({ x: M, y, width: CW, height: segTop - y, borderColor: C.navy, borderWidth: 0.9 });
+    if (note) { y -= 9; page.drawText(clean(note), { x: M + 1, y: y + 1, size: 6.6, font, color: C.grey }); }
+    y -= gap;
   };
   const formHeight = (rows) => rows.reduce((n, r) => n + r.h, 0) + 24;
   /** «Observaciones:» bajo la ficha, como en el modelo, con el texto a continuación. */
   const observations = (text, { minH = mm(16) } = {}) => {
+    if (!room(14 + Math.min(minH, 40))) newPage();
     page.drawText('Observaciones:', { x: M + mm(3.5), y: y - 9, size: 9, font, color: C.text });
     y -= 12;
     const lines = wrap(font, 8.4, text, CW - mm(7));
@@ -636,7 +459,7 @@ async function createFnSheet({ code, related, procTitle, pharmacy, subject, draf
   newPage();
   /** Acceso al dibujo para los registros con rejilla propia (temperaturas): página actual, fuentes, colores y medidas. */
   const raw = () => ({ page, font, bold, C, M, CW, W, H, PAD, LBL, VAL, clean, wrap, cell, mm, bottom: M + FOOT });
-  return { mm, heading, draft, form, formHeight, observations, specs, newPage, room: (h) => room(h), finish, raw, at: () => y, moveTo: (v) => { y = v; } };
+  return { mm, heading, draft, form, formHeight, observations, specs, section, block, table, newPage, room: (h) => room(h), finish, raw, at: () => y, moveTo: (v) => { y = v; } };
 }
 
 const MP_DECISION = { aceptado: 'Aceptada', rechazado: 'Rechazada', bloqueado: 'Bloqueada', cuarentena: 'Pendiente (cuarentena)' };

@@ -6,7 +6,7 @@
  * sincronizarlo más adelante con la versión de PC.
  */
 
-const APP_VERSION = '0.3.19';
+const APP_VERSION = '0.3.20';
 const PREVIEW = document.documentElement.dataset.preview === '1'; // copia de prueba publicada en Claude
 const DB_NAME = 'farmalab-movil';
 const EXPORT_FORMAT = 'farmalab-datos';
@@ -153,7 +153,7 @@ const DEFAULT_SETTINGS = {
   // años de conservación desde la caducidad y días de aviso antes de borrar
   retention: { enabled: true, production: { general: 1, psicotropo: 2, estupefaciente: 5, veterinaria: 5 }, material: 1, packaging: 1, notice_days: 30 },
   // PNT de recepción, control de conformidad y almacenamiento de materias primas (Formulario Nacional)
-  fn: { mp_code: 'PN/L/PG/005/00', mp_related: '', pack_code: 'PN/L/PG/006/00', pack_related: '', temp_code: 'PN/L/PG/009/00', temp_related: '' },
+  fn: { mp_code: 'PN/L/PG/005/00', mp_related: '', pack_code: 'PN/L/PG/006/00', pack_related: '', temp_code: 'PN/L/PG/009/00', temp_related: '', guide_code: 'RD 175/2001', guide_related: '' },
   temp: { points: DEFAULT_TEMP_POINTS },
   updated_at: '',
 };
@@ -423,6 +423,7 @@ function normalizeSettings(stored) {
   if (!str(s.fn.mp_code)) s.fn.mp_code = DEFAULT_SETTINGS.fn.mp_code;
   if (!str(s.fn.pack_code)) s.fn.pack_code = DEFAULT_SETTINGS.fn.pack_code;
   if (!str(s.fn.temp_code)) s.fn.temp_code = DEFAULT_SETTINGS.fn.temp_code;
+  if (!str(s.fn.guide_code)) s.fn.guide_code = DEFAULT_SETTINGS.fn.guide_code;
   const points = (saved.temp && Array.isArray(saved.temp.points) ? saved.temp.points : []).filter(validTempPoint);
   s.temp = { points: (points.length ? points : DEFAULT_TEMP_POINTS).map((p) => ({ id: p.id, name: str(p.name).slice(0, 60), kind: p.kind, min: p.min, max: p.max })) };
   return s;
@@ -1023,6 +1024,10 @@ async function viewSettings() {
         ${field('PNT de temperaturas', text('fn_temp_code', `value="${esc(s.fn.temp_code)}" maxlength="40"`), 'Formulario Nacional: PN/L/PG/009/00.')}
         ${field('Procedimientos relacionados', text('fn_temp_related', `value="${esc(s.fn.temp_related)}" maxlength="120"`), 'Opcional.')}
       </div>
+      <div class="grid2">
+        ${field('Código de la ficha de registro (ficha 2)', text('fn_guide_code', `value="${esc(s.fn.guide_code)}" maxlength="40"`), 'Por defecto, RD 175/2001. Puedes poner el de vuestro PNT.')}
+        ${field('Procedimientos relacionados', text('fn_guide_related', `value="${esc(s.fn.guide_related)}" maxlength="120"`), 'Se añaden a los PNT de la fórmula.')}
+      </div>
       <p class="hint">Aparecen en la cabecera de los registros (anexo II) y de las especificaciones (anexo III).</p>
     </div></section>
     <section><h2>Utillaje y controles habituales</h2><div class="panel form">
@@ -1551,6 +1556,7 @@ const FORMS = {
         mp_code: str(d.fn_mp_code).slice(0, 40) || DEFAULT_SETTINGS.fn.mp_code, mp_related: str(d.fn_mp_related).slice(0, 120),
         pack_code: str(d.fn_pack_code).slice(0, 40) || DEFAULT_SETTINGS.fn.pack_code, pack_related: str(d.fn_pack_related).slice(0, 120),
         temp_code: str(d.fn_temp_code).slice(0, 40) || DEFAULT_SETTINGS.fn.temp_code, temp_related: str(d.fn_temp_related).slice(0, 120),
+        guide_code: str(d.fn_guide_code).slice(0, 40) || DEFAULT_SETTINGS.fn.guide_code, guide_related: str(d.fn_guide_related).slice(0, 120),
       },
       retention,
       equipment: lines(d.equipment),

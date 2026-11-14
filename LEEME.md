@@ -1,4 +1,4 @@
-# FARMA·LAB móvil v0.3.19 (prototipo)
+# FARMA·LAB móvil v0.3.20 (prototipo)
 
 App que se instala desde Chrome o Edge (Android y Windows) y funciona sin conexión. Los datos se guardan **en el propio dispositivo** y, si se configura, se sincronizan entre el móvil y el PC a través de Google Drive.
 
@@ -6,7 +6,7 @@ App que se instala desde Chrome o Edge (Android y Windows) y funciona sin conexi
 - **Almacén.** Materias primas con número de control interno, proveedor, lote, boletín de análisis y ficha de seguridad adjuntos, detección de excipientes de declaración obligatoria y cambio de estado (cuarentena, aceptado, rechazado, bloqueado). Material de acondicionamiento (envases) con su ficha y su stock.
 - **Fórmulas.** Varios componentes, códigos nacionales por presentación o concentración, PNT vinculados y estados borrador, aprobada y obsoleta.
 - **Elaborar.** Guía de elaboración (RD 175/2001): pesadas con lote, envases usados, utillaje, control de calidad y decisión del farmacéutico. Estados en proceso, elaborada y dispensada. Lote `[Año]-J-[Mes]-FM-[Número]` consecutivo, que nunca se reinicia. Número de libro recetario al dispensar.
-- **Registros del RD 175/2001 en PDF A4**, listos para imprimir y firmar: registro y especificaciones de materias primas (anexos II y III del PN/L/PG/005/00 del Formulario Nacional), registro de material de acondicionamiento (anexo II del PN/L/PG/006/00) y ficha 2 (registro de formulación magistral).
+- **Registros del RD 175/2001 en PDF A4**, listos para imprimir y firmar: registro y especificaciones de materias primas (anexos II y III del PN/L/PG/005/00 del Formulario Nacional), registro de material de acondicionamiento (anexo II del PN/L/PG/006/00) y ficha 2 (registro de formulación magistral), todos con el diseño de los registros del Formulario Nacional.
 - **Etiquetas en PDF** en folio A4 (8 o 2 por folio). Paciente, prescriptor y nº de colegiado se escriben solo al imprimir y no se guardan.
 - **Avisos en la app**: stock bajo, envases por reponer, caducidades, cuarentena, elaboraciones paradas más de 2 días y datos que faltan.
 - **Calculadora**: cantidad a pesar (% m/m, m/v, v/v, mg/g, mg/ml, ppm, 1:X, mg por unidad) con riqueza, factor sal/base y densidad; conversión de unidades y diluciones.
@@ -14,6 +14,10 @@ App que se instala desde Chrome o Edge (Android y Windows) y funciona sin conexi
 - **Temperaturas** (PN/L/PG/009/00): lectura diaria del local y la nevera, incidencias y registro mensual en PDF.
 - **Documentos**: PNT y bibliografía con su PDF, Word o foto, que se consultan dentro de la app, también sin conexión.
 - Registro de actividad, bloqueo con PIN, exportar e importar copias.
+
+## Novedades de la v0.3.20
+- **La ficha 2 (registro de formulación magistral) tiene el mismo diseño que los registros de materias primas y acondicionamiento**: cabecera azul con el título («Guía de elaboración, control y registro de fórmula magistral» o «de preparado oficinal»), el código y la página, y los PNT de la fórmula como procedimientos relacionados; «FICHA 2» en rojo; celdas azules con la etiqueta y blancas con el dato; un apartado por cada punto del RD 175/2001 (composición, modus operandi, materias primas, acondicionamiento, personal y utillaje, control de calidad, dispensación), «Observaciones» y la decisión con fecha y firma del farmacéutico responsable. Las tablas largas siguen en la página siguiente con su cabecera.
+- El código de la cabecera (por defecto, RD 175/2001) se puede cambiar en Ajustes.
 
 ## Novedades de la v0.3.19
 - **Temperatura tiene su propia pestaña** en el menú de abajo, entre Elaborar y Documentos. Lleva un punto ámbar si falta la lectura de hoy y rojo si hay una temperatura fuera de rango o una incidencia abierta.
