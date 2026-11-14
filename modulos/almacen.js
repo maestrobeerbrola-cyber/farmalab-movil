@@ -265,7 +265,7 @@ function viewMaterialFormHtml(m) {
         ${field('Monografía n.º', text('spec_monograph_no', `value="${esc(v.spec_monograph_no || '')}" maxlength="40"`), 'Si cumple RFE.')}
         ${field('Farmacopea', text('spec_pharmacopoeia', `value="${esc(v.spec_pharmacopoeia || '')}" maxlength="80"`), 'Si es otra (Ph. Eur., USP...).')}
       </div>
-      ${field('Monografía', text('monograph', `value="${esc(v.monograph || '')}" maxlength="160"`), 'Título de la monografía o documento del proveedor.')}
+      ${field('Monografía', text('monograph', `value="${esc(v.monograph || '')}" maxlength="160"`), 'Si cumple RFE, su título (sale junto al nº). Si es otra farmacopea, su monografía; si es del fabricante, su documento de especificaciones.')}
       ${field('Identificación', `<textarea name="spec_identification" maxlength="1500">${esc(v.spec_identification || '')}</textarea>`)}
       ${field('Impurezas', `<textarea name="spec_impurities" maxlength="1500">${esc(v.spec_impurities || '')}</textarea>`)}
       ${field('Descripción de los procedimientos analíticos', `<textarea name="spec_methods" maxlength="3000">${esc(specMethods(v))}</textarea>`)}

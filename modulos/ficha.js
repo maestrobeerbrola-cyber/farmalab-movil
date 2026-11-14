@@ -397,14 +397,19 @@ function pdfSymbols(t) {
  * «Recepción, control de conformidad y almacenamiento de materias primas» del Formulario Nacional,
  * con su cabecera de procedimiento (título, código, página y procedimientos relacionados).
  */
-const FN_MP_TITLE = 'Recepción, control de conformidad y almacenamiento de materias primas';
+const FN_MP_TITLE = 'Recepción, control de conformidad\ny almacenamiento de materias primas';   // con el corte de línea del modelo
 
-/** Motor de hojas con el formato de los procedimientos del Formulario Nacional (A4 vertical, tablas con bordes). */
+/**
+ * Motor de hojas con el diseño de los procedimientos del Formulario Nacional (3.ª edición):
+ * cabecera azul marino con el título del procedimiento, el código y «Página x de y» (en lila),
+ * fila de «Procedimientos relacionados», «ANEXO» en rojo y celdas de etiqueta azules con texto blanco.
+ */
+const FN_COLORS = { navy: [27, 53, 93], lilac: [203, 203, 216], crimson: [194, 7, 52], text: [60, 60, 59], grey: [103, 103, 102] };
 async function createFnSheet({ code, related, procTitle, pharmacy, subject, draftMissing = [] }) {
   const { PDFDocument, StandardFonts, rgb } = await loadPdfLib();
   const doc = await PDFDocument.create();
   doc.setTitle(subject);
-  doc.setSubject(`${procTitle} (${code})`);
+  doc.setSubject(`${procTitle.replace(/\n/g, ' ')} (${code})`);
   doc.setCreator('FARMA·LAB');
   doc.setProducer('FARMA·LAB');
   const font = await doc.embedFont(StandardFonts.Helvetica);
@@ -413,12 +418,11 @@ async function createFnSheet({ code, related, procTitle, pharmacy, subject, draf
   const clean = (t) => [...pdfSymbols(t).replace(/[^\S\n]+/g, ' ')]
     .map((ch) => (ch === '\n' || charset.has(ch.codePointAt(0)) ? ch : '?')).join('').trim();
   const mm = (v) => (v * 72) / 25.4;
-  const W = mm(210); const H = mm(297); const M = mm(15); const CW = W - 2 * M;
-  const FOOT = mm(10);
-  const K = {
-    ink: rgb(0, 0, 0), mid: rgb(0.33, 0.33, 0.33), rule: rgb(0, 0, 0), fill: rgb(0.88, 0.88, 0.88),
-    faint: rgb(0.7, 0.7, 0.7), warn: rgb(0.52, 0.31, 0.04), warnBg: rgb(0.984, 0.933, 0.835),
-  };
+  const W = mm(210); const H = mm(297); const M = mm(16); const CW = W - 2 * M;
+  const FOOT = mm(12);
+  const C = Object.fromEntries(Object.entries(FN_COLORS).map(([k, v]) => [k, rgb(v[0] / 255, v[1] / 255, v[2] / 255)]));
+  C.white = rgb(1, 1, 1); C.ink = rgb(0.1, 0.1, 0.1);
+  C.warn = rgb(0.52, 0.31, 0.04); C.warnBg = rgb(0.984, 0.933, 0.835);
   const wrap = (f, size, value, width) => {
     const out = [];
     for (const para of clean(value).split('\n')) {
@@ -437,202 +441,233 @@ async function createFnSheet({ code, related, procTitle, pharmacy, subject, draf
       }
       out.push(line);
     }
-    return out;
+    return out.filter((l, i, all) => l || all.length === 1);
   };
-  const rect = (pg, x, top, w, h, fill) => pg.drawRectangle({ x, y: top - h, width: w, height: h, borderColor: K.rule, borderWidth: 0.7, ...(fill ? { color: fill } : {}) });
-  const vline = (pg, x, top, h) => pg.drawLine({ start: { x, y: top }, end: { x, y: top - h }, thickness: 0.7, color: K.rule });
-  const text = (pg, t, x, yy, size, f = font, color = K.ink) => pg.drawText(t, { x, y: yy, size, font: f, color });
-
-  // Cabecera de procedimiento en cada página: título | código y página; procedimientos relacionados.
-  const titleLines = wrap(bold, 10.5, procTitle, CW * 0.68 - mm(6));
-  const row1H = Math.max(titleLines.length * 13 + mm(5), mm(14));
-  const row2H = mm(6.5);
-  const HEAD_H = 12 + row1H + row2H;
-  const pages = []; const pageSlots = [];
+  const pages = []; const slots = [];
   let page; let y;
+  const LBL = 7; const VAL = 8.6; const PAD = 3.2;
+  /** Celda: fondo azul con etiqueta blanca, o blanca con borde azul y su valor. */
+  const cell = (x, top, w, h, { label = '', value = '', center = false, middle = false, fill = null, box = false, mark = false, valueSize = VAL } = {}) => {
+    const isLabel = Boolean(label);
+    page.drawRectangle({ x, y: top - h, width: w, height: h, color: isLabel ? C.navy : (fill || C.white), borderColor: isLabel ? C.white : C.navy, borderWidth: isLabel ? 0.8 : 0.8 });
+    if (isLabel) {
+      const ls = wrap(bold, LBL, label, w - 2 * PAD);
+      const off = middle ? Math.max(0, (h - 2 * PAD - ls.length * LBL * 1.15) / 2) : 0;   // centrada en vertical, como en el anexo III
+      ls.forEach((ln, k) => {
+        const tx = center ? x + (w - bold.widthOfTextAtSize(ln, LBL)) / 2 : x + PAD;
+        page.drawText(ln, { x: tx, y: top - PAD - off - (k + 1) * LBL * 1.15 + 1.5, size: LBL, font: bold, color: C.white });
+      });
+    } else if (box) {   // casilla
+      const s = 8.5; const bx = x + (w - s) / 2; const by = top - h / 2 - s / 2;
+      page.drawRectangle({ x: bx, y: by, width: s, height: s, borderColor: C.navy, borderWidth: 0.9, color: C.white });
+      if (mark) {
+        page.drawLine({ start: { x: bx + 1.6, y: by + 1.6 }, end: { x: bx + s - 1.6, y: by + s - 1.6 }, thickness: 1.2, color: C.ink });
+        page.drawLine({ start: { x: bx + 1.6, y: by + s - 1.6 }, end: { x: bx + s - 1.6, y: by + 1.6 }, thickness: 1.2, color: C.ink });
+      }
+    } else if (str(value)) {
+      const ls = wrap(font, valueSize, value, w - 2 * PAD);
+      ls.forEach((ln, k) => {
+        const tx = center ? x + (w - font.widthOfTextAtSize(ln, valueSize)) / 2 : x + PAD;
+        page.drawText(ln, { x: tx, y: top - PAD - (k + 1) * valueSize * 1.22 + 2, size: valueSize, font, color: C.ink });
+      });
+    }
+  };
+  /** Alto que necesita un texto en una celda de ancho w (como mínimo, el del modelo). */
+  const need = (value, w, min, { f = font, size = VAL } = {}) => (str(value) ? Math.max(min, wrap(f, size, value, w - 2 * PAD).length * size * 1.22 + 2 * PAD + 1) : min);
+  const needLabel = (label, w, min) => Math.max(min, wrap(bold, LBL, label, w - 2 * PAD).length * LBL * 1.15 + 2 * PAD);
+
   const drawHeader = (pg) => {
-    let top = H - M;
-    text(pg, clean(pharmacy && pharmacy.name ? pharmacy.name : 'Oficina de farmacia'), M, top - 8, 8.5, bold);
-    const pnt = 'PROCEDIMIENTOS NORMALIZADOS DE TRABAJO';
-    text(pg, pnt, W - M - font.widthOfTextAtSize(pnt, 7.5), top - 8, 7.5, font, K.mid);
-    top -= 12;
-    const leftW = CW * 0.68;
-    rect(pg, M, top, CW, row1H + row2H);
-    vline(pg, M + leftW, top, row1H);
-    pg.drawLine({ start: { x: M, y: top - row1H }, end: { x: M + CW, y: top - row1H }, thickness: 0.7, color: K.rule });
-    const ty0 = top - (row1H - titleLines.length * 13) / 2 - 10;
-    titleLines.forEach((ln, i) => text(pg, ln, M + mm(3), ty0 - i * 13, 10.5, bold));
-    text(pg, 'Código:', M + leftW + mm(3), top - mm(5), 7.5, font, K.mid);
-    text(pg, clean(code), M + leftW + mm(3) + font.widthOfTextAtSize('Código: ', 7.5), top - mm(5), 9, bold);
-    pageSlots.push({ pg, x: M + leftW + mm(3), y: top - row1H + mm(3.2) });
+    const ph = clean(pharmacy && pharmacy.name ? pharmacy.name : '');
+    const topY = H - mm(13);
+    if (ph) pg.drawText(ph, { x: M, y: topY, size: 7, font: bold, color: C.grey });
+    const pnt = 'PROCEDIMIENTOS NORMALIZADOS DE TRABAJO'; const fn = 'FORMULARIO NACIONAL';
+    const fnW = bold.widthOfTextAtSize(fn, 7); const pntW = font.widthOfTextAtSize(pnt, 6.2);
+    pg.drawText(fn, { x: W - M - fnW, y: topY, size: 7, font: bold, color: C.navy });
+    pg.drawLine({ start: { x: W - M - fnW - 4, y: topY - 2 }, end: { x: W - M - fnW - 4, y: topY + 8 }, thickness: 1.3, color: C.navy });
+    pg.drawText(pnt, { x: W - M - fnW - 8 - pntW, y: topY, size: 6.2, font, color: C.grey });
+    // cabecera del procedimiento
+    const top = H - mm(25);
+    const leftW = CW * 0.639; const rightW = CW - leftW;
+    const rowH = 15.5;
+    const tl = wrap(bold, 8.4, procTitle, leftW - 2 * PAD - 2);
+    const h1 = Math.max(2 * rowH, tl.length * 10 + 2 * PAD);
+    pg.drawRectangle({ x: M, y: top - h1, width: leftW, height: h1, color: C.navy });
+    tl.forEach((ln, k) => pg.drawText(ln, { x: M + PAD + 1, y: top - (h1 - tl.length * 10) / 2 - (k + 1) * 10 + 2.5, size: 8.4, font: bold, color: C.white }));
+    pg.drawRectangle({ x: M + leftW + 1.2, y: top - rowH, width: rightW - 1.2, height: rowH, color: C.navy });
+    const cd = clean(code);
+    pg.drawText(cd, { x: M + leftW + 1.2 + (rightW - 1.2 - bold.widthOfTextAtSize(cd, 8.6)) / 2, y: top - rowH + 4.6, size: 8.6, font: bold, color: C.white });
+    pg.drawRectangle({ x: M + leftW + 1.2, y: top - h1, width: rightW - 1.2, height: h1 - rowH - 1, color: C.lilac });
+    slots.push({ pg, cx: M + leftW + 1.2 + (rightW - 1.2) / 2, y: top - h1 + (h1 - rowH - 1) / 2 - 3 });
+    const relTop = top - h1;
+    const relH = 13;
+    pg.drawRectangle({ x: M, y: relTop - relH, width: CW, height: relH, borderColor: C.navy, borderWidth: 0.8 });
     const rel = clean(`Procedimientos relacionados: ${related || ''}`);
-    text(pg, wrap(font, 8, rel, CW - mm(6))[0], M + mm(3), top - row1H - row2H + mm(2.1), 8);
+    pg.drawText(wrap(font, 6.6, rel, CW - mm(8))[0], { x: M + mm(4), y: relTop - relH + 4, size: 6.6, font, color: C.text });
+    return relTop - relH;
   };
   const newPage = () => {
     page = doc.addPage([W, H]);
     pages.push(page);
-    drawHeader(page);
-    y = H - M - HEAD_H - mm(5);
+    y = drawHeader(page) - mm(7);
   };
   const room = (h) => y - h >= M + FOOT;
-  const ensure = (h) => { if (!room(h)) { newPage(); return true; } return false; };
 
-  /** «ANEXO II» y el nombre del registro, centrados, como en el Formulario Nacional. */
+  /** «ANEXO II» en rojo y el nombre del registro debajo, como en el modelo. */
   const heading = (annex, title) => {
-    ensure(mm(30));
-    const a = clean(annex); const t = clean(title);
-    text(page, a, (W - bold.widthOfTextAtSize(a, 10)) / 2, y - 10, 10, bold);
-    text(page, t, (W - bold.widthOfTextAtSize(t, 13)) / 2, y - 27, 13, bold);
-    y -= 27 + mm(6);
+    page.drawText(clean(annex), { x: M, y: y - 9, size: 9.5, font: bold, color: C.crimson });
+    page.drawText(clean(title), { x: M + mm(3.5), y: y - 27, size: 10, font, color: C.text });
+    y -= 27 + mm(4.5);
   };
-  /** Tabla con todos los bordes; la cabecera se repite al pasar de página. */
-  const table = (cols, rows, { size = 7.2, headSize = 6.6, minH = 0, fill = false } = {}) => {
-    const widths = cols.map((c) => c.w * CW);
-    const cp = 2.6;
-    const header = () => {
-      const lines = cols.map((c, i) => wrap(bold, headSize, c.title, widths[i] - 2 * cp));
-      const h = Math.max(...lines.map((l) => l.length)) * headSize * 1.2 + 2 * cp + 2;
-      ensure(h + Math.max(minH, 20));
-      rect(page, M, y, CW, h, K.fill);
-      let x = M;
-      lines.forEach((ls, i) => {
-        if (i) vline(page, x, y, h);
-        const block = ls.length * headSize * 1.2;
-        ls.forEach((ln, k) => {
-          const tw = bold.widthOfTextAtSize(ln, headSize);
-          text(page, ln, x + (widths[i] - tw) / 2, y - (h - block) / 2 - (k + 1) * headSize * 1.2 + 2, headSize, bold);
-        });
-        x += widths[i];
-      });
-      y -= h;
-    };
-    const drawRow = (row) => {
-      const lines = row.map((v, i) => wrap(i === 0 ? bold : font, size, v, widths[i] - 2 * cp));
-      const h = Math.max(minH, Math.max(...lines.map((l) => l.length)) * size * 1.25 + 2 * cp + 1);
-      if (!room(h)) { newPage(); header(); }
-      rect(page, M, y, CW, h);
-      let x = M;
-      lines.forEach((ls, i) => {
-        if (i) vline(page, x, y, h);
-        ls.forEach((ln, k) => text(page, ln, x + cp, y - cp - (k + 1) * size * 1.25 + 2, size, i === 0 ? bold : font));
-        x += widths[i];
-      });
-      y -= h;
-    };
-    header();
-    rows.forEach(drawRow);
-    if (fill) {   // filas en blanco hasta el pie, para seguir anotando a mano
-      const h = Math.max(minH, size * 1.25 + 2 * cp + 1);
-      while (room(h)) drawRow(cols.map(() => ''));
-    }
-  };
-  /** Recuadro con título («Observaciones:») y texto; si no cabe, continúa en la página siguiente. */
-  const box = (label, value, { minH = mm(18), size = 8 } = {}) => {
-    const lines = wrap(font, size, value, CW - mm(6));
-    const lh = size * 1.3;
-    let i = 0; let first = true;
-    do {
-      ensure(Math.min(minH, 40) + 16);
-      const avail = Math.floor((y - (M + FOOT) - mm(5) - 14) / lh);
-      const chunk = lines.slice(i, i + Math.max(1, avail));
-      const h = Math.max(first ? minH : 0, chunk.length * lh + mm(5) + 12);
-      rect(page, M, y, CW, h);
-      text(page, clean(first ? label : `${label} (continuación)`), M + mm(3), y - mm(2.5) - 7, 8, bold);
-      chunk.forEach((ln, k) => text(page, ln, M + mm(3), y - mm(2.5) - 9 - (k + 1) * lh + 2, size));
-      y -= h;
-      i += chunk.length; first = false;
-      if (i < lines.length) newPage();
-    } while (i < lines.length);
-  };
-  /** Fila con bordes: etiqueta en negrita y valor. */
-  const field1 = (label, value) => {
-    const l = clean(label);
-    const lw = bold.widthOfTextAtSize(l, 8.5) + mm(5);
-    const lines = wrap(font, 9.5, value, CW - lw - mm(4));
-    const h = Math.max(mm(9), lines.length * 12 + mm(4));
-    ensure(h);
-    rect(page, M, y, CW, h);
-    text(page, l, M + mm(3), y - h / 2 - 3, 8.5, bold);
-    lines.forEach((ln, k) => text(page, ln, M + lw, y - (h - lines.length * 12) / 2 - 9 - k * 12, 9.5));
-    y -= h;
-  };
-  /** Casillas (☐/☒) con un dato a la derecha, en un recuadro. */
-  const checks = (items) => {
-    const rh = mm(8.5);
-    const h = rh * items.length;
-    ensure(h);
-    rect(page, M, y, CW, h);
-    items.forEach((it, i) => {
-      const top = y - i * rh;
-      if (i) page.drawLine({ start: { x: M, y: top }, end: { x: M + CW, y: top }, thickness: 0.4, color: K.faint });
-      const bx = M + mm(3); const by = top - rh / 2 - 4.5;
-      page.drawRectangle({ x: bx, y: by, width: 9, height: 9, borderColor: K.rule, borderWidth: 0.8 });
-      if (it.on) {
-        page.drawLine({ start: { x: bx + 1.6, y: by + 1.6 }, end: { x: bx + 7.4, y: by + 7.4 }, thickness: 1.1, color: K.ink });
-        page.drawLine({ start: { x: bx + 1.6, y: by + 7.4 }, end: { x: bx + 7.4, y: by + 1.6 }, thickness: 1.1, color: K.ink });
-      }
-      text(page, clean(it.label), bx + 15, by + 1.5, 9.5, it.on ? bold : font);
-      if (it.extraLabel) {
-        const ex = M + CW * 0.42;
-        text(page, clean(it.extraLabel), ex, by + 1.5, 8.5, font, K.mid);
-        const vx = ex + font.widthOfTextAtSize(clean(it.extraLabel), 8.5) + 4;
-        page.drawLine({ start: { x: vx, y: by - 1 }, end: { x: M + CW - mm(3), y: by - 1 }, thickness: 0.5, color: K.faint, dashArray: [1.5, 1.5] });
-        if (it.extra) text(page, wrap(font, 9.5, it.extra, M + CW - mm(3) - vx)[0], vx + 2, by + 1.5, 9.5);
-      }
-    });
-    y -= h;
-  };
-  /** Tabla de dos columnas: apartado (sombreado) y contenido; un apartado vacío deja sitio para escribir. */
-  const kv = (rows, { labelW = 0.34, minH = mm(13) } = {}) => {
-    const lw = CW * labelW; const vw = CW - lw;
-    for (const [label, value] of rows) {
-      const ll = wrap(bold, 8.5, label, lw - mm(5));
-      const vl = str(value) ? wrap(font, 9, value, vw - mm(5)) : [];
-      const h = Math.max(minH, ll.length * 11 + mm(4), vl.length * 11.5 + mm(4));
-      ensure(h);
-      rect(page, M, y, lw, h, K.fill);
-      rect(page, M + lw, y, vw, h);
-      ll.forEach((ln, k) => text(page, ln, M + mm(2.5), y - mm(2.2) - 8 - k * 11, 8.5, bold));
-      vl.forEach((ln, k) => text(page, ln, M + lw + mm(2.5), y - mm(2.2) - 8 - k * 11.5, 9));
-      y -= h;
-    }
-  };
-  const gap = (v) => { y -= v; };
   const draft = () => {
     if (!draftMissing.length) return;
-    const lines = wrap(font, 8.4, `Faltan datos: ${draftMissing.join('; ')}.`, CW - mm(8));
-    const h = 13 + lines.length * 8.4 * 1.3 + mm(3);
-    ensure(h);
-    page.drawRectangle({ x: M, y: y - h, width: CW, height: h, color: K.warnBg });
-    text(page, 'Borrador: registro incompleto', M + mm(4), y - mm(2) - 9, 9.2, bold, K.warn);
+    const lines = wrap(font, 8, `Faltan datos: ${draftMissing.join('; ')}.`, CW - mm(8));
+    const h = 13 + lines.length * 8 * 1.3 + mm(3);
+    page.drawRectangle({ x: M, y: y - h, width: CW, height: h, color: C.warnBg });
+    page.drawText('Borrador: registro incompleto', { x: M + mm(4), y: y - mm(2) - 9, size: 9, font: bold, color: C.warn });
     let ty = y - mm(2) - 11;
-    lines.forEach((ln) => { ty -= 8.4 * 1.3; text(page, ln, M + mm(4), ty + 2, 8.4, font, K.warn); });
+    lines.forEach((ln) => { ty -= 8 * 1.3; page.drawText(ln, { x: M + mm(4), y: ty + 2, size: 8, font, color: C.warn }); });
     y -= h + mm(4);
   };
+
+  /** Anexo II: la ficha de registro de un lote, con sus celdas en el orden y la proporción del modelo. */
+  const registerCard = (v) => {
+    const X = (f) => M + f * CW;
+    const W2 = (a, b) => (b - a) * CW;
+    const g1 = [0, 0.161, 0.398, 0.645, 1];
+    const g4 = [0, 0.161, 0.284, 0.398, 0.645, 0.782, 1];
+    const g5 = [0, 0.398, 0.645, 1];
+    const r1 = Math.max(28, needLabel('Registro interno', W2(0, 0.161), 0), need(v.internal, W2(0.161, 0.398), 0), need(v.name, W2(0.645, 1), 0));
+    const r2 = Math.max(15, need(v.supplier, W2(0.161, 0.398), 0), need(v.lot, W2(0.645, 1), 0));
+    const r3 = Math.max(28, need(v.qc, W2(0.161, 1), 0));
+    const r4 = Math.max(28, need(v.qty, W2(0.398, 0.645), 0), need(v.containers, W2(0.782, 1), 0));
+    const r5 = 15;
+    const r6 = Math.max(40, need(v.decision, W2(0, 0.398), 0), need(v.signer, W2(0.645, 1), 0));
+    let top = y;
+    cell(X(g1[0]), top, W2(g1[0], g1[1]), r1, { label: 'Registro interno' });
+    cell(X(g1[1]), top, W2(g1[1], g1[2]), r1, { value: v.internal });
+    cell(X(g1[2]), top, W2(g1[2], g1[3]), r1, { label: 'Nombre del producto' });
+    cell(X(g1[3]), top, W2(g1[3], g1[4]), r1, { value: v.name });
+    top -= r1;
+    cell(X(g1[0]), top, W2(g1[0], g1[1]), r2, { label: 'Proveedor' });
+    cell(X(g1[1]), top, W2(g1[1], g1[2]), r2, { value: v.supplier });
+    cell(X(g1[2]), top, W2(g1[2], g1[3]), r2, { label: 'Lote' });
+    cell(X(g1[3]), top, W2(g1[3], g1[4]), r2, { value: v.lot });
+    top -= r2;
+    cell(X(0), top, W2(0, 0.161), r3, { label: 'Control de calidad' });
+    cell(X(0.161), top, W2(0.161, 1), r3, { value: v.qc });
+    top -= r3;
+    const l4 = ['Fecha de recepción', v.received, 'Cantidad', v.qty, 'Número de envases', v.containers];
+    for (let i = 0; i < 6; i += 1) cell(X(g4[i]), top, W2(g4[i], g4[i + 1]), r4, i % 2 ? { value: l4[i] } : { label: l4[i] });
+    top -= r4;
+    ['Decisión final', 'Fecha', 'Firma'].forEach((t, i) => cell(X(g5[i]), top, W2(g5[i], g5[i + 1]), r5, { label: t }));
+    top -= r5;
+    [v.decision, v.date, v.signer].forEach((t, i) => cell(X(g5[i]), top, W2(g5[i], g5[i + 1]), r6, { value: t }));
+    top -= r6;
+    page.drawRectangle({ x: M, y: top, width: CW, height: y - top, borderColor: C.navy, borderWidth: 0.9 });
+    y = top - mm(5);
+  };
+  const cardHeight = (v) => 28 + 15 + 28 + 28 + 15 + 40 + 6 + str(v.name).length / 4;   // aproximado, para saltar de página antes
+  /** «Observaciones:» bajo la ficha, como en el modelo, con el texto a continuación. */
+  const observations = (text, { minH = mm(16) } = {}) => {
+    page.drawText('Observaciones:', { x: M + mm(3.5), y: y - 9, size: 9, font, color: C.text });
+    y -= 12;
+    const lines = wrap(font, 8.4, text, CW - mm(7));
+    const start = y;
+    lines.forEach((ln) => {
+      if (!room(11)) newPage();
+      y -= 11;
+      page.drawText(ln, { x: M + mm(3.5), y: y + 2, size: 8.4, font, color: C.ink });
+    });
+    if (start - y < minH) y = start - minH;
+    y -= mm(6);   // separación hasta la ficha siguiente
+  };
+
+  /** Anexo III: especificaciones, con la misma rejilla del modelo. */
+  const specs = (v) => {
+    const X = (f) => M + f * CW;
+    const W2 = (a, b) => (b - a) * CW;
+    const a0 = 0, a1 = 0.124, a2 = 0.313, a3 = 0.489, a4 = 0.65, a5 = 1;
+    let top = y;
+    cell(X(0), top, CW, 16, { label: 'Nombre de la materia prima', center: true });
+    top -= 16;
+    const rN = need(v.name, CW, 18);
+    cell(X(0), top, CW, rN, { value: v.name, center: true });
+    top -= rN + 4;
+    const blockTop = top;
+    cell(X(a0), top, W2(a0, a1), 16, { label: 'Cumple', center: false });
+    cell(X(a1), top, W2(a1, a2), 16, { label: 'RFE', center: true });
+    cell(X(a2), top, W2(a2, a5), 16, { label: 'Monografía n.º:', center: true });
+    top -= 16;
+    const rC = need(v.rfeNo, W2(a2, a5), 20);
+    cell(X(a1), top, W2(a1, a2), rC, { box: true, mark: v.rfe });
+    cell(X(a2), top, W2(a2, a5), rC, { value: v.rfeNo, center: true });
+    top -= rC;
+    const rD = Math.max(28, need(v.pharmacopoeia, W2(a3, a4), 0));
+    cell(X(a1), top, W2(a1, a2), rD, { label: 'Otra farmacopea', middle: true });
+    cell(X(a2), top, W2(a2, a3), rD, { label: 'Farmacopea', middle: true });
+    cell(X(a3), top, W2(a3, a4), rD, { value: v.pharmacopoeia });
+    cell(X(a4), top, W2(a4, a5), rD, { label: 'Fabricante o proveedor' });
+    top -= rD;
+    const rE = Math.max(34, need(v.monograph, W2(a3, a4), 0));
+    cell(X(a1), top, W2(a1, a2), rE, { box: true, mark: v.other });
+    cell(X(a2), top, W2(a2, a3), rE, { label: 'Monografía', middle: true });
+    cell(X(a3), top, W2(a3, a4), rE, { value: v.monograph });
+    cell(X(a4), top, W2(a4, a5), rE, { box: true, mark: v.maker });
+    top -= rE;
+    const rF = need(v.identification, W2(a2, a5), 31);
+    cell(X(a1), top, W2(a1, a2), rF, { label: 'Identificación', middle: true });
+    cell(X(a2), top, W2(a2, a5), rF, { value: v.identification });
+    top -= rF;
+    const rG = need(v.impurities, W2(a2, a5), 32);
+    cell(X(a1), top, W2(a1, a2), rG, { label: 'Impurezas', middle: true });
+    cell(X(a2), top, W2(a2, a5), rG, { value: v.impurities });
+    top -= rG;
+    cell(X(a1), top, W2(a1, a5), 16, { label: 'Descripción de los procedimientos analíticos' });
+    top -= 16;
+    const rI = need(v.methods, W2(a1, a5), 59);
+    cell(X(a1), top, W2(a1, a5), rI, { value: v.methods });
+    top -= rI;
+    // columna «Cumple»: blanca, desde la fila de las casillas hasta el final del bloque
+    page.drawRectangle({ x: X(a0), y: top, width: W2(a0, a1), height: blockTop - 16 - top, color: C.white, borderColor: C.navy, borderWidth: 0.8 });
+    page.drawRectangle({ x: M, y: top, width: CW, height: blockTop - top, borderColor: C.navy, borderWidth: 0.9 });
+    top -= 5;
+    const b0 = 0.363;
+    [['Condiciones de conservación', v.storage], ['Precauciones al manipular', v.handling], ['Toxicidad y peligrosidad', v.toxicity]].forEach(([lab, val]) => {
+      const h = need(val, W2(b0, 1), 35);
+      page.drawRectangle({ x: X(0), y: top - h, width: W2(0, b0), height: h, color: C.navy, borderColor: C.white, borderWidth: 0.8 });
+      page.drawText(clean(lab), { x: X(0) + PAD + 1, y: top - h / 2 - 2.5, size: LBL + 0.4, font: bold, color: C.white });
+      cell(X(b0), top, W2(b0, 1), h, { value: val });
+      top -= h;
+    });
+    y = top - mm(4);
+  };
+
   const finish = async () => {
     const stamp = new Date().toLocaleString('es-ES', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
-    pageSlots.forEach(({ pg, x, y: py }, i) => {
-      text(pg, `Página ${i + 1} de ${pages.length}`, x, py, 9, bold);
+    slots.forEach(({ pg, cx, y: py }, i) => {
+      const t = `Página ${i + 1} de ${pages.length}`;
+      pg.drawText(t, { x: cx - bold.widthOfTextAtSize(t, 8.4) / 2, y: py, size: 8.4, font: bold, color: C.text });
       const foot = clean(`${draftMissing.length ? 'BORRADOR · ' : ''}Generado con FARMA·LAB el ${stamp}`);
-      text(pg, foot, W - M - font.widthOfTextAtSize(foot, 6.8), M, 6.8, font, K.mid);
+      pg.drawText(foot, { x: W - M - font.widthOfTextAtSize(foot, 6.4), y: mm(9), size: 6.4, font, color: C.grey });
     });
     return new Blob([await doc.save()], { type: 'application/pdf' });
   };
   newPage();
-  return { mm, heading, table, box, field1, checks, kv, gap, draft, newPage, finish };
+  return { mm, heading, draft, registerCard, cardHeight, observations, specs, newPage, room: (h) => room(h), finish };
 }
 
 const MP_DECISION = { aceptado: 'Aceptada', rechazado: 'Rechazada', bloqueado: 'Bloqueada', cuarentena: 'Pendiente (cuarentena)' };
 const yesNoMark = (v) => (v === true ? 'conforme' : v === false ? 'NO conforme' : 'sin valorar');
-/** Fila del registro de materias primas (anexo II), en el orden de sus columnas. */
-function mpRegisterRow(m) {
+/** Datos de la ficha del anexo II de un lote. */
+function mpCardValues(m) {
   const qty = isNum(m.quantity_received) ? m.quantity_received : m.quantity;
   const decided = ['aceptado', 'rechazado', 'bloqueado'].includes(m.status) && isDay(m.decision_date);
-  return [
-    m.internal_no || '', m.name, m.supplier || '', m.lot, m.qc_no || '', isDay(m.received_date) ? fmtDay(m.received_date) : '',
-    isNum(qty) ? `${fmtNum(qty)} ${m.unit}` : '', m.containers ? String(m.containers) : '',
-    MP_DECISION[m.status] || m.status, decided ? fmtDay(m.decision_date) : '', decided ? (m.decision_by || '') : '',
-  ];
+  return {
+    internal: m.internal_no || '', name: m.name, supplier: m.supplier || '', lot: m.lot, qc: m.qc_no || '',
+    received: isDay(m.received_date) ? fmtDay(m.received_date) : '', qty: isNum(qty) ? `${fmtNum(qty)} ${m.unit}` : '',
+    containers: m.containers ? String(m.containers) : '', decision: MP_DECISION[m.status] || m.status,
+    date: decided ? fmtDay(m.decision_date) : '', signer: decided ? (m.decision_by || '') : '',
+  };
 }
 /** Observaciones de un lote para el registro: caducidad, recepción, conformidad, destino, revisión y notas. */
 function mpObservation(m, bulletins = []) {
@@ -656,43 +691,29 @@ function mpObservation(m, bulletins = []) {
   if (str(m.observations)) parts.push(m.observations);
   return parts.join('. ').replace(/\.\./g, '.');
 }
-// Anchos en mm sobre los 180 mm útiles: las fechas caben en una línea y la firma tiene sitio para firmar a mano.
-const MP_COLS = [
-  ['Registro interno', 15], ['Nombre del producto', 24], ['Proveedor', 17], ['Lote', 16], ['Control de calidad', 16],
-  ['Fecha de recepción', 17], ['Cantidad', 14], ['Número de envases', 12], ['Decisión final', 15], ['Fecha', 17], ['Firma', 17],
-].map(([title, w]) => ({ title, w: w / 180 }));
-/** Anexo II: registro de materias primas (uno o varios lotes). */
-async function drawMpRegister(sh, lots, bulletinsOf, { fill = false } = {}) {
+/** Anexo II: una ficha de registro por lote, cada una con sus observaciones debajo. */
+async function drawMpRegister(sh, lots, bulletinsOf) {
   sh.heading('ANEXO II', 'Registro de materias primas');
   sh.draft();
-  sh.table(MP_COLS, lots.map(mpRegisterRow), { minH: sh.mm(11), fill: false });
-  sh.gap(sh.mm(4));
-  const notes = lots.map((m) => {
-    const o = mpObservation(m, bulletinsOf(m));
-    return lots.length > 1 ? `${m.internal_no || 's/n'} · ${m.name} (lote ${m.lot}): ${o}` : o;
+  lots.forEach((m, i) => {
+    const v = mpCardValues(m);
+    const obsLines = Math.ceil(mpObservation(m, bulletinsOf(m)).length / 120) + 1;
+    if (i && !sh.room(sh.cardHeight(v) + 16 + obsLines * 11)) { sh.newPage(); sh.heading('ANEXO II', 'Registro de materias primas'); }
+    sh.registerCard(v);
+    sh.observations(mpObservation(m, bulletinsOf(m)), { minH: lots.length > 1 ? sh.mm(8) : sh.mm(30) });
   });
-  sh.box('Observaciones:', notes.join('\n'), { minH: sh.mm(fill ? 30 : 40) });
 }
 /** Anexo III: especificaciones de la materia prima. */
 function drawMpSpecs(sh, m) {
   sh.heading('ANEXO III', 'Especificaciones');
-  sh.field1('Nombre de la materia prima:', m.name);
-  sh.gap(sh.mm(3));
-  sh.checks([
-    { on: m.spec_source === 'rfe', label: 'Cumple RFE', extraLabel: 'Monografía n.º', extra: m.spec_source === 'rfe' ? m.spec_monograph_no : '' },
-    { on: m.spec_source === 'otra', label: 'Otra farmacopea', extraLabel: 'Farmacopea', extra: m.spec_source === 'otra' ? m.spec_pharmacopoeia : '' },
-    { on: m.spec_source === 'fabricante', label: 'Fabricante o proveedor', extraLabel: '', extra: '' },
-  ]);
-  sh.gap(sh.mm(3));
-  sh.kv([
-    ['Monografía', m.monograph],
-    ['Identificación', m.spec_identification],
-    ['Impurezas', m.spec_impurities],
-    ['Descripción de los procedimientos analíticos', specMethods(m)],
-    ['Condiciones de conservación', m.storage],
-    ['Precauciones al manipular', m.handling],
-    ['Toxicidad y peligrosidad', m.toxicity],
-  ]);
+  sh.specs({
+    name: m.name, rfe: m.spec_source === 'rfe', other: m.spec_source === 'otra', maker: m.spec_source === 'fabricante',
+    // «Monografía n.º» es la de la RFE; «Farmacopea» y «Monografía», las de otra farmacopea (o el documento del fabricante)
+    rfeNo: m.spec_source === 'rfe' ? [m.spec_monograph_no, m.monograph].filter((x) => str(x)).join(' · ') : '',
+    pharmacopoeia: m.spec_source === 'otra' ? m.spec_pharmacopoeia : '',
+    monograph: m.spec_source === 'rfe' ? '' : m.monograph, identification: m.spec_identification, impurities: m.spec_impurities, methods: specMethods(m),
+    storage: m.storage, handling: m.handling, toxicity: m.toxicity,
+  });
 }
 
 /** Datos que pide el PN/L/PG/005/00 y faltan en un lote. */
@@ -754,7 +775,7 @@ async function buildMpRegisterPdf(lots, s, period) {
   });
   const docs = await getAll(FILE_STORE);
   const bulletinsOf = (m) => docs.filter((f) => f.owner_uuid === m.uuid && f.kind === 'boletin').map((f) => f.name);
-  await drawMpRegister(sh, lots, bulletinsOf, { fill: true });
+  await drawMpRegister(sh, lots, bulletinsOf);
   return sh.finish();
 }
 

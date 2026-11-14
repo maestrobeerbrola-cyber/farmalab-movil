@@ -1,4 +1,4 @@
-# FARMA·LAB móvil v0.3.14 (prototipo)
+# FARMA·LAB móvil v0.3.15 (prototipo)
 
 App que se instala desde Chrome o Edge (Android y Windows) y funciona sin conexión. Los datos se guardan **en el propio dispositivo** y, si se configura, se sincronizan entre el móvil y el PC a través de Google Drive.
 
@@ -13,6 +13,9 @@ App que se instala desde Chrome o Edge (Android y Windows) y funciona sin conexi
 - **Precio de las fórmulas financiadas** (Comunidad de Madrid), ver abajo.
 - **Documentos**: PNT y bibliografía con su PDF, Word o foto, que se consultan dentro de la app, también sin conexión.
 - Registro de actividad, bloqueo con PIN, exportar e importar copias.
+
+## Novedades de la v0.3.15
+- El registro de materias primas (anexo II) y las especificaciones (anexo III) reproducen el diseño del PN/L/PG/005/00 de la 3.ª edición del Formulario Nacional: cabecera azul con el título, el código y la página; «ANEXO» en rojo; ficha de registro por lote con las celdas del modelo (registro interno, nombre del producto, proveedor, lote, control de calidad, fecha de recepción, cantidad, número de envases, decisión final, fecha y firma) y «Observaciones» debajo; y la rejilla de especificaciones del anexo III. El registro anual pone una ficha por lote.
 
 ## Novedades de la v0.3.14
 - **Materias primas según el PN/L/PG/005/00 del Formulario Nacional** («Recepción, control de conformidad y almacenamiento de materias primas»).
