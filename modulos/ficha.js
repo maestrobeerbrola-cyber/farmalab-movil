@@ -647,14 +647,15 @@ function mpCardValues(m) {
     internal: m.internal_no || '', name: m.name, supplier: m.supplier || '', lot: m.lot, qc: m.qc_no || '',
     received: isDay(m.received_date) ? fmtDay(m.received_date) : '', qty: isNum(qty) ? `${fmtNum(qty)} ${m.unit}` : '',
     containers: m.containers ? String(m.containers) : '', decision: MP_DECISION[m.status] || m.status,
+    // Casilla propia para la caducidad (PN/L/PG/005/00, 4.1.2); si no tiene, la fecha del próximo control analítico.
+    expiry: isDay(m.expiry) ? fmtDay(m.expiry) : isDay(m.retest_date) ? `${fmtDay(m.retest_date)} (próximo control analítico)` : '',
     date: decided ? fmtDay(m.decision_date) : '', signer: decided ? (m.decision_by || '') : '',
   };
 }
-/** Observaciones de un lote para el registro: caducidad, recepción, conformidad, destino, revisión y notas. */
+/** Observaciones de un lote para el registro: recepción, conformidad, destino, revisión y notas (la caducidad tiene su casilla). */
 function mpObservation(m, bulletins = []) {
   const parts = [];
-  if (isDay(m.expiry)) parts.push(`Caducidad: ${fmtDay(m.expiry)}`);
-  if (isDay(m.retest_date)) parts.push(`Próximo control analítico: ${fmtDay(m.retest_date)}`);
+  if (isDay(m.expiry) && isDay(m.retest_date)) parts.push(`Próximo control analítico: ${fmtDay(m.retest_date)}`);
   const rc = m.reception || {};
   if (inspectionDone(rc)) parts.push(`Recepción conforme (albarán, material y envases)${rc.date ? ` el ${fmtDay(rc.date)}` : ''}${rc.by ? ` por ${rc.by}` : ''}`);
   else parts.push('Inspección en la recepción no registrada');
@@ -679,7 +680,7 @@ function mpCardRows(v) {
   return [
     { h: 28, cells: [L(0, 0.161, 'Registro interno'), V(0.161, 0.398, v.internal), L(0.398, 0.645, 'Nombre del producto'), V(0.645, 1, v.name)] },
     { h: 15, cells: [L(0, 0.161, 'Proveedor'), V(0.161, 0.398, v.supplier), L(0.398, 0.645, 'Lote'), V(0.645, 1, v.lot)] },
-    { h: 28, cells: [L(0, 0.161, 'Control de calidad'), V(0.161, 1, v.qc)] },
+    { h: 28, cells: [L(0, 0.161, 'Control de calidad'), V(0.161, 0.645, v.qc), L(0.645, 0.782, 'Fecha de caducidad'), V(0.782, 1, v.expiry)] },
     { h: 28, cells: [L(0, 0.161, 'Fecha de recepción'), V(0.161, 0.284, v.received), L(0.284, 0.398, 'Cantidad'), V(0.398, 0.645, v.qty), L(0.645, 0.782, 'Número de envases'), V(0.782, 1, v.containers)] },
     { h: 15, cells: [L(0, 0.398, 'Decisión final'), L(0.398, 0.645, 'Fecha'), L(0.645, 1, 'Firma')] },
     { h: 40, cells: [V(0, 0.398, v.decision), V(0.398, 0.645, v.date), V(0.645, 1, v.signer)] },
@@ -782,7 +783,7 @@ async function buildMpRegisterPdf(lots, s, period) {
 
 const REGISTERS = {
   mp: { store: 'material', back: '#materias', title: 'Registro de materias primas', code: (s) => s.fn.mp_code,
-    what: 'una ficha por lote, por fecha de recepción, con sus observaciones (caducidad, recepción, control de conformidad, destino de los rechazados y revisión anual)', label: 'Lotes recibidos en' },
+    what: 'una ficha por lote, por fecha de recepción, con su caducidad y sus observaciones (recepción, control de conformidad, destino de los rechazados y revisión anual)', label: 'Lotes recibidos en' },
   ac: { store: 'packaging', back: '#envases', title: 'Registro de material de acondicionamiento', code: (s) => s.fn.pack_code,
     what: 'una ficha por material recibido, por fecha de recepción, con sus observaciones (inspección en la recepción, revisión anual y eliminación de material caducado u obsoleto)', label: 'Material recibido en' },
 };

@@ -6,7 +6,7 @@
  * sincronizarlo más adelante con la versión de PC.
  */
 
-const APP_VERSION = '0.3.16';
+const APP_VERSION = '0.3.17';
 const PREVIEW = document.documentElement.dataset.preview === '1'; // copia de prueba publicada en Claude
 const DB_NAME = 'farmalab-movil';
 const EXPORT_FORMAT = 'farmalab-datos';
@@ -183,6 +183,7 @@ const ROUTES = {};
 const AFTER_RENDER = [];
 const INPUT_HOOKS = [];
 const CHANGE_HOOKS = [];
+const NEEDED = {};          // casillas necesarias para generar los registros en PDF, por formulario (ver refreshNeeded)
 const STATUS_CHECKS = {};   // comprobaciones antes de cambiar de estado: store -> async (registro, estado) => opciones de ask() o null
 const ROW_BUILDERS = {};    // filas repetibles de los formularios (data-act="addRow" data-kind="...")
 const DELETE_CHECKS = {};   // antes de eliminar: store -> async (registro) => { message, block } (block impide eliminar)
@@ -491,6 +492,61 @@ const formMsg = () => '<div class="msg error" data-formmsg hidden role="alert"><
 const field = (label, input, hint = '') => `<label class="field"><span>${label}</span>${input}${hint ? `<span class="hint">${hint}</span>` : ''}</label>`;
 const text = (name, attrs = '') => `<input type="text" name="${name}" ${attrs}>`;
 const decimal = (name, attrs = '') => `<input type="text" inputmode="decimal" autocomplete="off" name="${name}" ${attrs}>`;
+// ------------------------------------------------------------------ casillas necesarias para los registros en PDF
+/* Cada módulo indica, por formulario, qué casillas hacen falta para generar su registro en PDF:
+   NEEDED[nombre] = { goal: 'generar …', after: texto o (form) => texto, when: (form) => ¿se aplica?, fields: (form) => [entrada…] }.
+   Cada entrada es un nombre de campo, un elemento (o lista) o [nombre o elemento(s), ¿relleno?].
+   Llevan un asterisco rojo y, mientras están vacías, un recuadro rojo. */
+const isFilled = (el) => (el.type === 'checkbox' || el.type === 'radio' ? el.checked : Boolean(str(el.value)));
+function needTarget(el) {
+  if (el.classList.contains('display-input')) return el.closest('.display') || el;
+  if (el.type === 'checkbox' || el.type === 'radio') return el.closest('.check') || el;
+  return el;
+}
+function refreshNeeded(form) {
+  const rule = form && form.isConnected && NEEDED[form.dataset.form];
+  if (!rule) return;
+  $$('.need, .need-empty', form).forEach((x) => x.classList.remove('need', 'need-empty'));
+  if (rule.when && !rule.when(form)) { const old = $('[data-need-legend]', form); if (old) old.remove(); return; }
+  let missing = 0;
+  for (const entry of rule.fields(form)) {
+    const [what, given] = Array.isArray(entry) && (typeof entry[1] === 'boolean' || entry.length === 1) ? entry : [entry];
+    const els = (typeof what === 'string' ? $$(`[name="${what}"]`, form) : [what].flat()).filter(Boolean);
+    if (!els.length) continue;
+    const ok = typeof given === 'boolean' ? given : els.some(isFilled);
+    if (!ok) missing += 1;
+    els.forEach((el) => {
+      const t = ['INPUT', 'SELECT', 'TEXTAREA'].includes(el.tagName) ? needTarget(el) : el;
+      t.classList.add('need');
+      if (!ok) t.classList.add('need-empty');
+      const f = el.closest('.field');
+      if (f) f.classList.add('need');
+      else if (!t.classList.contains('check')) {   // filas y grupos sin etiqueta propia: el asterisco va en el título del apartado
+        const h = t.closest('section') && $(':scope > h2', t.closest('section'));
+        if (h) h.classList.add('need');
+      }
+    });
+  }
+  let legend = $('[data-need-legend]', form);
+  if (!legend) {
+    legend = document.createElement('p');
+    legend.className = 'need-legend';
+    legend.dataset.needLegend = '';
+    legend.setAttribute('aria-live', 'polite');
+    const msg = $('[data-formmsg]', form);
+    if (msg) msg.after(legend); else form.prepend(legend);
+  }
+  const after = typeof rule.after === 'function' ? rule.after(form) : (rule.after || '');
+  legend.classList.toggle('done', !missing);
+  legend.innerHTML = missing
+    ? `<span class="need-key" aria-hidden="true">*</span> Necesario para ${esc(rule.goal)}. <strong>${missing === 1 ? 'Falta 1 casilla' : `Faltan ${missing} casillas`}</strong>, recuadradas en rojo.${after ? ` ${esc(after)}` : ''}`
+    : `<span class="need-key" aria-hidden="true">*</span> Necesario para ${esc(rule.goal)}. <strong>Ya están todas las casillas necesarias.</strong>${after ? ` ${esc(after)}` : ''}`;
+}
+const refreshAllNeeded = () => $$('form[data-form]').forEach((f) => { try { refreshNeeded(f); } catch (err) { console.error(err); } });
+AFTER_RENDER.push(refreshAllNeeded);
+INPUT_HOOKS.push((t) => refreshNeeded(t.closest && t.closest('form')));
+CHANGE_HOOKS.push((t) => refreshNeeded(t.closest && t.closest('form')));
+
 const yearsInput = (name, v) => `<div class="withunit"><input type="text" inputmode="numeric" autocomplete="off" name="${name}" value="${esc(v)}" maxlength="2"><span>años</span></div>`;
 
 function toast(message) {
@@ -1369,7 +1425,9 @@ async function onClick(e) {
   const handler = ACTIONS[el.dataset.act];
   if (!handler) return;
   e.preventDefault();
-  try { await handler(el, e); } catch (err) { reportError(err, el.closest('form')); }
+  const form = el.closest('form');
+  try { await handler(el, e); } catch (err) { reportError(err, form); }
+  if (form && form.isConnected) refreshNeeded(form);   // filas añadidas o quitadas
 }
 
 // ------------------------------------------------------------------ formularios

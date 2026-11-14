@@ -236,7 +236,7 @@ async function viewProduction(id) {
     : (packUsed.length ? `<ul class="list">${packUsed.map((u) => `<li><div class="row"><span class="row-main">${esc(u.name)}${u.lot ? ` <span class="code">lote ${esc(u.lot)}</span>` : ''}</span><b class="num">${fmtNum(u.qty)} uds.</b></div></li>`).join('')}</ul>` : '<p class="hint none-docs">Sin material de acondicionamiento registrado.</p>');
 
   const pnts = p.pnt_refs || [];
-  const guide = `<form class="form" data-form="guide" data-id="${esc(p.uuid)}" novalidate>
+  const guide = `<form class="form" data-form="guide" data-id="${esc(p.uuid)}" data-status="${esc(p.status)}" data-pnts="${pnts.length}"${isNum(p.validity_days) ? ' data-validity' : ''} novalidate>
     ${formMsg()}
     <section><h2>Pesadas</h2>
       <div class="progress"><progress max="${ws.length}" value="${done}"></progress><span>${done} de ${ws.length} pesadas completas</span></div>
@@ -252,7 +252,7 @@ async function viewProduction(id) {
       ${field('Farmacéutico/s', text('staff_pharmacists', `value="${esc(p.staff_pharmacists ?? p.operator ?? '')}" maxlength="200"`))}
       ${field('Auxiliares (nombre y apellidos)', text('staff_assistants', `value="${esc(p.staff_assistants || '')}" maxlength="200"`), 'Separados por comas. Aparecen en la ficha de registro.')}
     </div></section>
-    <section><h2>Utillaje utilizado</h2><div class="panel checks">
+    <section><h2>Utillaje utilizado</h2><div class="panel checks" data-equipment>
       ${equipment.map((e) => checkbox('equipment', esc(e), (p.equipment || []).includes(e), `value="${esc(e)}"`)).join('')}
       ${field('Otro utillaje', text('equipment_other', 'maxlength="200" placeholder="Separado por comas"'))}
     </div></section>
@@ -826,3 +826,35 @@ Object.assign(ACTIONS, {
     }
   },
 });
+
+// Casillas necesarias para la ficha de registro (ficha 2), en rojo en la guía.
+NEEDED.guide = {
+  goal: 'generar la ficha de registro (ficha 2)',
+  when: (f) => f.dataset.status !== 'rechazada',
+  after: (f) => (f.dataset.status === 'en_proceso' ? 'El lote y la fecha de elaboración se ponen al marcarla como elaborada.' : ''),
+  fields: (f) => {
+    const status = f.dataset.status;
+    const out = [...$$('[data-weigh-actual]', f), ...$$('[data-weigh-lot]', f)];
+    const packs = $$('select[name="pack_uuid"]', f);
+    const incl = $$('input[name="pack_incl"]', f);
+    if (packs.length || incl.length) {
+      const chosen = [...packs, ...incl].filter(isFilled);
+      out.push(chosen.length ? [chosen, true] : [[packs[0], ...incl].filter(Boolean), false]);
+    }
+    if (f.dataset.pnts === '0') out.push('method_notes');
+    out.push('staff_pharmacists');
+    const eq = $('[data-equipment]', f);
+    if (eq) out.push([eq, $$('input[name="equipment"]', f).some(isFilled) || isFilled(f.elements.equipment_other)]);
+    const rows = $$('[data-rows="qc"] [data-comp]', f);
+    const done = rows.filter((r) => str($('[name="qc_result"]', r).value));
+    if (done.length) done.forEach((r) => out.push($('[name="qc_ok"]', r)));
+    else if (rows.length) out.push($('[name="qc_result"]', rows[0]), $('[name="qc_ok"]', rows[0]));
+    out.push('qc_by');
+    if (status !== 'en_proceso') out.push('elaborated_date');
+    if (status !== 'en_proceso' || f.dataset.validity === undefined) out.push('expiry_date');
+    out.push('storage');
+    if (f.elements.decision) out.push('decision');
+    if (status === 'dispensada') out.push('recetario_no', 'dispensed_date', 'dispensed_qty');
+    return out;
+  },
+};

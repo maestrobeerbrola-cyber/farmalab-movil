@@ -223,3 +223,14 @@ Object.assign(FORMS, {
     location.hash = `#formulas--${rec.uuid}`;
   },
 });
+
+// Casillas de la fórmula que pasan a la ficha de registro (ficha 2) de cada elaboración, en rojo.
+NEEDED.formula = {
+  goal: 'la ficha de registro de sus elaboraciones (ficha 2)',
+  fields: (f) => {
+    const rows = $$('[data-rows="comp"] [data-comp]', f);
+    const named = rows.filter((r) => str($('[name="ingredient"]', r).value));
+    const comps = named.length ? named.map((r) => $('[name="amount"]', r)) : (rows[0] ? [$('[name="ingredient"]', rows[0]), $('[name="amount"]', rows[0])] : []);
+    return ['name', 'form', 'storage', 'target_amount', ...comps];
+  },
+};

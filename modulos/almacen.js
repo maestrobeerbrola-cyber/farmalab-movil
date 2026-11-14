@@ -236,14 +236,14 @@ function eliminationForm(p) {
 function viewMaterialFormHtml(m) {
   const v = m || { status: 'cuarentena', received_date: todayIso(), unit: 'g', kind: 'excipiente' };
   const detected = edoMatch(v.name);
-  return `<form class="form" data-form="material" ${m ? `data-id="${esc(m.uuid)}"` : ''} novalidate>
+  return `<form class="form" data-form="material" ${m ? `data-id="${esc(m.uuid)}"` : ''}${m && isDay(m.retest_date) ? ' data-retest' : ''} novalidate>
     ${formMsg()}
     <fieldset class="group"><legend>Identificación</legend>
       ${field('Nombre (DOE o DCI)', text('name', `value="${esc(v.name || '')}" required maxlength="160" data-edo-source`))}
       <p class="hint edo-hint" data-edo-hint>${detected ? `Figura como excipiente de declaración obligatoria: ${esc(detected)}.` : ''}</p>
       <div class="grid2">
         ${field('Tipo', `<select name="kind">${options(Object.keys(KIND_LABELS), v.kind || 'excipiente', { ...KIND_LABELS, ambos: 'Activo o excipiente' })}</select>`, 'Uso habitual. Lo que cuenta es la función que se marca en cada fórmula.')}
-        ${field('Nº registro interno', text('internal_no', `value="${esc(v.internal_no || '')}" maxlength="40"`), 'Vuestro número de control interno.')}
+        ${field('Nº registro interno', text('internal_no', `value="${esc(v.internal_no || '')}" maxlength="40"`), 'Si se deja vacío, se asigna el siguiente al aceptar el lote.')}
       </div>
       ${checkbox('edo', 'Excipiente de declaración obligatoria', m ? m.edo : Boolean(detected), 'data-edo-check')}
     </fieldset>
@@ -265,7 +265,7 @@ function viewMaterialFormHtml(m) {
       </div>
       <div class="grid2">
         ${field('Stock mínimo', decimal('min_stock', `value="${esc(inputNum(v.min_stock))}"`), 'Aviso de reposición.')}
-        ${field('Caducidad', dateInput('expiry', v.expiry))}
+        ${field('Caducidad', dateInput('expiry', v.expiry), m && isDay(m.retest_date) ? `Próximo control analítico: ${fmtDay(m.retest_date)}.` : '')}
       </div>
       ${field('Código de artículo', text('code', `value="${esc(v.code || '')}" maxlength="80"`), 'Opcional: código del proveedor.')}
     </fieldset>
@@ -478,7 +478,45 @@ CHANGE_HOOKS.push(async (t) => {
   if (MATERIAL_UNITS.includes(prev.unit)) form.elements.unit.value = prev.unit;
   const note = $('[data-spec-copied]', form);
   if (note) { note.textContent = `Especificaciones copiadas del lote ${prev.lot}. Revísalas por si han cambiado.`; note.hidden = false; }
+  refreshNeeded(form);
 });
+
+// Casillas necesarias para generar los registros en PDF (en rojo en los formularios).
+const fieldValue = (form, name) => str(form.elements[name] && form.elements[name].value);
+NEEDED.material = {
+  goal: 'generar el registro de la materia prima (anexos II y III)',
+  after: (f) => (f.dataset.id ? '' : 'Después faltarán el control de conformidad y la decisión del farmacéutico.'),
+  fields: (f) => {
+    const src = fieldValue(f, 'spec_source');
+    return [
+      'name', 'supplier', 'lot', 'qc_no', 'received_date', 'containers', 'quantity',
+      ...(f.dataset.retest !== undefined ? [] : ['expiry']),
+      ...Object.keys(MP_RECEPTION_CHECKS).map((k) => `rc_${k}`),
+      'spec_source',
+      ...(src === 'rfe' ? ['spec_monograph_no'] : []),
+      ...(src === 'otra' ? ['spec_pharmacopoeia', 'spec_identification', 'spec_impurities', 'spec_methods'] : []),
+      'storage', 'handling', 'toxicity',
+      ...(f.elements.pack_included && f.elements.pack_included.checked ? ['pack_desc'] : []),
+    ];
+  },
+};
+NEEDED.materialQc = {
+  goal: 'aceptar el lote',
+  fields: (f) => {
+    const rows = $$('[data-comp]', f);
+    const done = rows.filter((r) => str($('[name="mq_result"]', r).value));
+    if (!done.length) return rows.length ? ['mq_test', 'mq_result', 'mq_ok'].map((n) => $(`[name="${n}"]`, rows[0])) : [];
+    return done.map((r) => $('[name="mq_ok"]', r));
+  },
+};
+NEEDED.recordDisposal = { goal: 'completar el registro del lote rechazado', fields: () => ['method', 'date'] };
+NEEDED.packaging = {
+  goal: 'generar el registro de acondicionamiento (anexo II)',
+  fields: (f) => [
+    'name', 'supplier', ...(fieldValue(f, 'kind') === 'secundario' ? [] : ['lot']), 'received_date', 'quantity', 'containers',
+    ...Object.keys(PACK_CHECKS).map((k) => `insp_${k}`),
+  ],
+};
 
 Object.assign(ACTIONS, {
   recordReview: async (el) => {
@@ -593,7 +631,7 @@ async function viewPackagingForm(id) {
       ${field('Capacidad', text('capacity', `value="${esc(v.capacity || '')}" maxlength="40" placeholder="50 g, 100 ml..."`))}
     </div>
     <div class="grid2">
-      ${field('Nº registro interno', text('internal_no', `value="${esc(v.internal_no || '')}" maxlength="40"`))}
+      ${field('Nº registro interno', text('internal_no', `value="${esc(v.internal_no || '')}" maxlength="40"`), p ? '' : 'Si se deja vacío, se asigna el siguiente (AC-0001…).')}
       ${field('Proveedor', text('supplier', `value="${esc(v.supplier || '')}" maxlength="160"`))}
     </div>
     <div class="grid2">

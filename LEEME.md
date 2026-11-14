@@ -1,4 +1,4 @@
-# FARMA·LAB móvil v0.3.16 (prototipo)
+# FARMA·LAB móvil v0.3.17 (prototipo)
 
 App que se instala desde Chrome o Edge (Android y Windows) y funciona sin conexión. Los datos se guardan **en el propio dispositivo** y, si se configura, se sincronizan entre el móvil y el PC a través de Google Drive.
 
@@ -13,6 +13,10 @@ App que se instala desde Chrome o Edge (Android y Windows) y funciona sin conexi
 - **Precio de las fórmulas financiadas** (Comunidad de Madrid), ver abajo.
 - **Documentos**: PNT y bibliografía con su PDF, Word o foto, que se consultan dentro de la app, también sin conexión.
 - Registro de actividad, bloqueo con PIN, exportar e importar copias.
+
+## Novedades de la v0.3.17
+- **Casilla propia para la fecha de caducidad** en el registro de materias primas (anexo II), junto al control de calidad. Si el lote no tiene caducidad, aparece la fecha del próximo control analítico. El registro de acondicionamiento y la ficha 2 ya la tenían.
+- **Casillas necesarias en rojo.** En el alta y edición de materias primas, envases y fórmulas, en el control de conformidad y en la guía de elaboración, lo que hace falta para generar el registro en PDF lleva un asterisco rojo y, mientras está vacío, un recuadro rojo. Arriba del formulario se indica cuántas casillas faltan; cuando están todas, el aviso pasa a verde. Lo que depende de otra respuesta se pide solo cuando toca (por ejemplo, el nº de monografía al elegir «Cumple RFE» o el lote solo en el acondicionamiento primario).
 
 ## Novedades de la v0.3.16
 - **Material de acondicionamiento según el PN/L/PG/006/00 del Formulario Nacional** («Recepción y almacenamiento del material de acondicionamiento»).
