@@ -1,4 +1,4 @@
-# FARMA·LAB móvil v0.3.20 (prototipo)
+# FARMA·LAB móvil v0.3.21 (prototipo)
 
 App que se instala desde Chrome o Edge (Android y Windows) y funciona sin conexión. Los datos se guardan **en el propio dispositivo** y, si se configura, se sincronizan entre el móvil y el PC a través de Google Drive.
 
@@ -14,6 +14,12 @@ App que se instala desde Chrome o Edge (Android y Windows) y funciona sin conexi
 - **Temperaturas** (PN/L/PG/009/00): lectura diaria del local y la nevera, incidencias y registro mensual en PDF.
 - **Documentos**: PNT y bibliografía con su PDF, Word o foto, que se consultan dentro de la app, también sin conexión.
 - Registro de actividad, bloqueo con PIN, exportar e importar copias.
+
+## Novedades de la v0.3.21
+- **Especificaciones (anexo III) propuestas desde el Formulario Nacional.** Al escribir el nombre de una materia prima nueva, o con el botón «Proponer desde el Formulario Nacional», se rellenan las casillas vacías: «Cumple RFE», nº y título de la monografía y, si el FN los da, las características y la conservación. Incluye las 39 materias primas con monografía en el FN y unas 70 más que aparecen en sus tablas de materias primas (excipientes, fórmulas tipificadas y preparados oficinales). Reconoce nombres en otro orden o sinónimos (lidocaína clorhidrato = hidrocloruro de lidocaína, bicarbonato sódico…). Las precauciones y la toxicidad se completan con la ficha de seguridad.
+- **Etiquetas de estado para los envases**: «En cuarentena», «Aceptado» con el nº de registro interno y la caducidad, «Rechazado» y «Bloqueado», de materias primas y acondicionamiento. Desde la ficha de cada lote o varias a la vez (Almacén → Etiquetas de estado), en hojas A4 de 8 (105 × 74 mm) o 24 etiquetas (70 × 37 mm), empezando en la etiqueta que se quiera para aprovechar hojas usadas.
+- **Diseño para el PC**: en pantallas anchas el menú pasa a la izquierda, el Inicio se ordena en dos columnas y los formularios largos y las fichas del almacén se reparten en dos columnas.
+- **Comprobar la sincronización** (Ajustes → Sincronización): revisa paso a paso la configuración, la dirección de la app, la conexión, la sesión de Google, Google Drive y el último envío (desde qué equipo y con qué versión), hace una sincronización de prueba y explica cómo arreglar cada error (por ejemplo, «Error 403: access_denied»: añadir la cuenta como usuario de prueba).
 
 ## Novedades de la v0.3.20
 - **La ficha 2 (registro de formulación magistral) tiene el mismo diseño que los registros de materias primas y acondicionamiento**: cabecera azul con el título («Guía de elaboración, control y registro de fórmula magistral» o «de preparado oficinal»), el código y la página, y los PNT de la fórmula como procedimientos relacionados; «FICHA 2» en rojo; celdas azules con la etiqueta y blancas con el dato; un apartado por cada punto del RD 175/2001 (composición, modus operandi, materias primas, acondicionamiento, personal y utillaje, control de calidad, dispensación), «Observaciones» y la decisión con fecha y firma del farmacéutico responsable. Las tablas largas siguen en la página siguiente con su cabecera.

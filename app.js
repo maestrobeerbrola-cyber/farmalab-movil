@@ -6,7 +6,7 @@
  * sincronizarlo más adelante con la versión de PC.
  */
 
-const APP_VERSION = '0.3.20';
+const APP_VERSION = '0.3.21';
 const PREVIEW = document.documentElement.dataset.preview === '1'; // copia de prueba publicada en Claude
 const DB_NAME = 'farmalab-movil';
 const EXPORT_FORMAT = 'farmalab-datos';
@@ -117,6 +117,7 @@ const SECTIONS = {
   temperaturas: { title: 'Temperaturas', tab: 4 },
   registrotemp: { title: 'Registro de temperaturas', tab: 4 },
   fichaenv: { title: 'Registro de envase', tab: 1 },
+  etiquetaestado: { title: 'Etiquetas de estado', tab: 1 },
   pnt: { title: 'PNT', tab: 5 },
   biblio: { title: 'Bibliografía', tab: 5 },
   documento: { title: 'Documento', tab: 5 },
@@ -818,9 +819,13 @@ async function renderRoute() {
   if ((location.hash || '#inicio') !== hash || !state.unlocked) return;   // ya se ha pedido otra pantalla: se pintará esa
   state.objectUrls.forEach((u) => URL.revokeObjectURL(u));
   state.objectUrls = [];
-  $('#view').innerHTML = html;
+  const view = $('#view');
+  view.innerHTML = html;
+  // Para el diseño de pantalla ancha: qué apartado es y si es la lista, una ficha o un formulario.
+  view.dataset.view = sec || 'inicio';
+  view.dataset.depth = !arg ? 'root' : (extra === 'editar' || ['nueva', 'nuevo'].includes(arg)) ? 'form' : 'detail';
   $('#title').textContent = info.title;
-  const sub = Boolean(arg) || ['ajustes', 'auditoria', 'papelera', 'conservacion', 'sincronizacion', 'calculadora', 'valoracion', 'etiqueta', 'registromp', 'registroac', 'registrotemp'].includes(sec);
+  const sub = Boolean(arg) || ['ajustes', 'auditoria', 'papelera', 'conservacion', 'sincronizacion', 'calculadora', 'valoracion', 'etiqueta', 'registromp', 'registroac', 'registrotemp', 'etiquetaestado'].includes(sec);
   $('#backBtn').hidden = !sub;
   $('#mark').hidden = sub;
   $$('.tabbar a').forEach((a, i) => {

@@ -94,7 +94,7 @@ async function viewMaterials() {
   const list = items.length
     ? `<ul class="list" data-list>${items.map((m) => `<li data-text="${esc(lc([m.name, m.lot, m.internal_no, m.code, m.supplier, m.qc_no].join(' ')))}"><a class="row" href="#materias--${esc(m.uuid)}"><div class="row-main"><strong>${esc(m.name)}${m.internal_no ? ` <span class="code">${esc(m.internal_no)}</span>` : ''}</strong><span class="sub"><span>Lote ${esc(m.lot)}</span><span>Cad. ${fmtDay(m.expiry)}</span><span class="${stockClass(m)}">${fmtNum(m.quantity)} ${esc(m.unit)}</span>${kindTag(m.kind)}${packIncluded(m) ? '<span class="doc-tag">Envase incluido</span>' : ''}${m.edo ? '<span class="doc-tag edo">EDO</span>' : ''}</span></div>${pill('material', m.status)}</a></li>`).join('')}</ul><p class="none" data-none hidden>Ningún lote coincide con la búsqueda.</p>`
     : empty('Aún no hay materias primas registradas.', 'Registra la primera recepción con «Nuevo lote».');
-  return `${segmented(STORE_TABS, '#materias')}${items.length ? searchBox('Buscar nombre, lote, nº interno o proveedor') : ''}${list}${items.length ? '<p class="more"><a href="#registromp">Registro de materias primas en PDF (anexo II)</a></p>' : ''}${fab('#materias--nueva', 'Nuevo lote')}`;
+  return `${segmented(STORE_TABS, '#materias')}${items.length ? searchBox('Buscar nombre, lote, nº interno o proveedor') : ''}${list}${items.length ? '<p class="more"><a href="#registromp">Registro de materias primas en PDF (anexo II)</a> · <a href="#etiquetaestado">Etiquetas de estado</a></p>' : ''}${fab('#materias--nueva', 'Nuevo lote')}`;
 }
 
 async function viewMaterial(id) {
@@ -149,6 +149,7 @@ async function viewMaterial(id) {
     <p class="hint">Al aceptar o rechazar, la decisión queda fechada y firmada con tu nombre. Al aceptar se le da el nº de registro interno, que se anota en el registro y en la etiqueta del envase.</p>
     ${m.status === 'rechazado' ? disposalForm(m, 'material') : ''}
     ${m.status === 'aceptado' ? reviewBlock(m, 'material') : ''}
+    ${statusLabelButton('material', m)}
     <p><a class="btn block secondary" href="#fichamp--${esc(m.uuid)}">${ICON.doc}Registro y especificaciones en PDF (${esc((await loadSettings()).fn.mp_code)})</a></p></section>
   <section><h2>Regularizar stock</h2>${stockAdjustForm('material', m)}</section>
   ${group && group.low ? `<p class="msg error">Stock bajo de ${esc(m.name)}: quedan ${fmtNum(group.total)} ${esc(group.unit)} y el mínimo es ${fmtNum(group.min)} ${esc(group.unit)}.</p>` : ''}
@@ -279,6 +280,7 @@ function viewMaterialFormHtml(m) {
     </fieldset>
     <fieldset class="group"><legend>Especificaciones (anexo III)</legend>
       <p class="hint" data-spec-copied hidden></p>
+      <button type="button" class="btn secondary small" data-act="fillSpecsFromFn">Proponer desde el Formulario Nacional</button>
       ${field('Origen de las especificaciones', `<select name="spec_source">${options(['', ...Object.keys(SPEC_SOURCES)], v.spec_source || '', { '': 'Elegir', ...SPEC_SOURCES })}</select>`, 'Por este orden: RFE; si no está, otra farmacopea de reconocido prestigio; y si no, las del fabricante o proveedor.')}
       <div class="grid2">
         ${field('Monografía n.º', text('spec_monograph_no', `value="${esc(v.spec_monograph_no || '')}" maxlength="40"`), 'Si cumple RFE.')}
@@ -472,13 +474,75 @@ CHANGE_HOOKS.push(async (t) => {
   if (SPEC_FIELDS.some((k) => str(form.elements[k].value))) return;
   const prev = (await getAll('material')).filter((m) => fold(m.name) === fold(t.value) && SPEC_FIELDS.some((k) => str(k === 'spec_methods' ? specMethods(m) : m[k])))
     .sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')))[0];
-  if (!prev) return;
+  if (!prev) { await fillFromFn(form, { quiet: true }); return; }
   SPEC_FIELDS.forEach((k) => { form.elements[k].value = k === 'spec_methods' ? specMethods(prev) : (prev[k] || ''); });
   if (KIND_LABELS[prev.kind]) form.elements.kind.value = prev.kind;
   if (MATERIAL_UNITS.includes(prev.unit)) form.elements.unit.value = prev.unit;
   const note = $('[data-spec-copied]', form);
   if (note) { note.textContent = `Especificaciones copiadas del lote ${prev.lot}. Revísalas por si han cambiado.`; note.hidden = false; }
   refreshNeeded(form);
+});
+
+// ------------------------------------------------------------------ especificaciones del Formulario Nacional
+/*
+ * Materias primas con monografía en el Formulario Nacional (3.ª ed.) o que aparecen en sus tablas de materias primas,
+ * con su monografía de la RFE. Se usan para proponer el anexo III: «Cumple RFE», nº y título de la monografía,
+ * características y conservación cuando el FN las da. Solo se rellenan casillas vacías.
+ */
+let fnMaterialsPromise = null;
+const FN_STOP = new Set(['de', 'del', 'la', 'el', 'los', 'las', 'y', 'en', 'al', 'por', 'ciento', 'a', 'con']);
+const FN_SYN = { clorhidrato: 'hidrocloruro', sodico: 'sodio', sodica: 'sodio', potasico: 'potasio', potasica: 'potasio', calcico: 'calcio', magnesico: 'magnesio', yodo: 'iodo', yoduro: 'ioduro', yodada: 'iodada', cinc: 'zinc', glicerina: 'glicerol' };
+const fnKey = (s) => fold(s).replace(/[^a-z0-9]+/g, ' ').split(' ').filter((w) => w && !FN_STOP.has(w)).map((w) => FN_SYN[w] || w).sort().join(' ');
+function loadFnMaterials() {
+  if (!fnMaterialsPromise) {
+    fnMaterialsPromise = fetch('./datos/fn-materias-primas.json').then((r) => { if (!r.ok) throw new Error(`no se pudo cargar la tabla del Formulario Nacional (${r.status})`); return r.json(); })
+      .then((d) => {
+        const index = new Map();
+        d.materias.forEach((m) => [m.name, ...(m.aliases || [])].forEach((n) => { const k = fnKey(n); if (k && !index.has(k)) index.set(k, m); }));
+        return { index, source: d.fuente };
+      }).catch((err) => { fnMaterialsPromise = null; throw err; });
+  }
+  return fnMaterialsPromise;
+}
+async function fnMaterialFor(name) {
+  const k = fnKey(name);
+  if (!k) return null;
+  return (await loadFnMaterials()).index.get(k) || null;
+}
+/** Rellena las especificaciones vacías con lo que da el Formulario Nacional para esa materia prima. */
+async function fillFromFn(form, { quiet = false } = {}) {
+  const name = str(form.elements.name.value);
+  let m = null;
+  try { m = name ? await fnMaterialFor(name) : null; } catch (err) { if (!quiet) throw new InputError(`No se pudo abrir la tabla del Formulario Nacional: ${err.message}`); return false; }
+  const note = $('[data-spec-copied]', form);
+  if (!m) {
+    if (!quiet) toast(name ? `${name} no está en las tablas del Formulario Nacional. Rellena las especificaciones con el boletín o la ficha técnica.` : 'Escribe primero el nombre de la materia prima.');
+    return false;
+  }
+  const set = (k, v) => { const el = form.elements[k]; if (el && v && !str(el.value)) { el.value = v; return true; } return false; };
+  const ref = m.rfe ? `la monografía n.º ${m.rfe} de la RFE` : '';
+  let n = 0;
+  if (m.rfe) {
+    n += set('spec_source', 'rfe');
+    n += set('spec_monograph_no', m.rfe);
+    n += set('monograph', m.name);
+    n += set('spec_identification', `Según ${ref}.${m.car ? ` Características: ${m.car}` : ''}`);
+    n += set('spec_impurities', `Según ${ref}.`);
+    n += set('spec_methods', `Ensayos y valoración según ${ref}.`);
+  } else if (m.car) {
+    n += set('spec_identification', `Características: ${m.car}`);
+  }
+  n += set('storage', m.storage);
+  if (note) {
+    note.textContent = `${m.rfe ? `Propuesto del Formulario Nacional: ${m.name}${m.fn ? ` (${m.fn})` : ''}, cumple RFE, monografía n.º ${m.rfe}.` : `${m.name}${m.fn ? ` (${m.fn})` : ''} no tiene monografía en la RFE: usa otra farmacopea o las especificaciones del fabricante.`}${/filante/i.test(name) && m.rfe === '1799' ? ' Equivalencia propuesta: compruébala con el boletín del proveedor.' : ''} Revísalo y completa precauciones y toxicidad con la ficha de datos de seguridad.`;
+    note.hidden = false;
+  }
+  refreshNeeded(form);
+  if (!quiet) toast(n ? `${n} ${n === 1 ? 'casilla rellenada' : 'casillas rellenadas'} con el Formulario Nacional.` : 'Las casillas ya tenían datos: no se ha cambiado nada.');
+  return n > 0;
+}
+Object.assign(ACTIONS, {
+  fillSpecsFromFn: async (el) => { await fillFromFn(el.closest('form')); },
 });
 
 // Casillas necesarias para generar los registros en PDF (en rojo en los formularios).
@@ -582,7 +646,7 @@ async function viewPackagings() {
   const list = items.length
     ? `<ul class="list" data-list>${items.map((p) => `<li data-text="${esc(lc([p.name, p.lot, p.internal_no, p.supplier, p.capacity].join(' ')))}"><a class="row" href="#envases--${esc(p.uuid)}"><div class="row-main"><strong>${esc(p.name)}${p.internal_no ? ` <span class="code">${esc(p.internal_no)}</span>` : ''}</strong><span class="sub"><span>${esc(PACK_KINDS[p.kind] || 'Primario')}</span>${p.lot ? `<span>Lote ${esc(p.lot)}</span>` : ''}<span class="${stockClass(p)}">${fmtNum(p.quantity)} uds.</span>${isDay(p.expiry) ? `<span>Cad. ${fmtDay(p.expiry)}</span>` : ''}</span></div>${pill('packaging', p.status)}</a></li>`).join('')}</ul><p class="none" data-none hidden>Nada coincide con la búsqueda.</p>`
     : empty('Aún no hay material de acondicionamiento.', 'Registra tarros, frascos, cápsulas, cajas o prospectos con «Nuevo envase».');
-  const registerLink = items.length ? '<p class="more"><a href="#registroac">Registro de material de acondicionamiento en PDF (anexo II)</a></p>' : '';
+  const registerLink = items.length ? '<p class="more"><a href="#registroac">Registro de material de acondicionamiento en PDF (anexo II)</a> · <a href="#etiquetaestado">Etiquetas de estado</a></p>' : '';
   return `${segmented(STORE_TABS, '#envases')}${items.length ? searchBox('Buscar envase, lote o nº interno') : ''}${list}${registerLink}${fab('#envases--nuevo', 'Nuevo envase')}`;
 }
 
@@ -613,6 +677,7 @@ async function viewPackaging(id) {
   <section><h2>Decisión de aceptación o rechazo</h2>${statusButtons('packaging', p)}
     ${p.status === 'rechazado' ? disposalForm(p, 'packaging') : ''}
     ${p.status === 'aceptado' ? reviewBlock(p, 'packaging') + eliminationForm(p) : ''}
+    ${statusLabelButton('packaging', p)}
     <p><a class="btn block secondary" href="#fichaenv--${esc(p.uuid)}">${ICON.doc}Registro en PDF (${esc((await loadSettings()).fn.pack_code)})</a></p></section>
   <section><h2>Regularizar stock</h2>${stockAdjustForm('packaging', p)}<p class="hint">El stock baja solo cuando una elaboración que usa este envase se marca como elaborada.</p></section>
   ${await docsSection('packaging', p.uuid, ['especificaciones', 'otro'])}

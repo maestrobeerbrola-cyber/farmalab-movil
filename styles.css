@@ -150,7 +150,7 @@ a.row:active { background: var(--paper); }
 .form { display: grid; gap: 16px; }
 .field { display: grid; gap: 6px; font-size: 14px; font-weight: 600; }
 .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
-input[type="text"], input[type="password"], input[type="date"], input[type="time"], input[type="month"], input[type="search"], select, textarea {
+input[type="text"], input[type="email"], input[type="password"], input[type="date"], input[type="time"], input[type="month"], input[type="search"], select, textarea {
   width: 100%; min-height: 48px; padding: 10px 12px;
   border: 1px solid var(--field-line); border-radius: 10px;
   background: var(--surface); font-size: 17px; font-weight: 400;
@@ -457,3 +457,59 @@ details.more-reading summary { cursor: pointer; color: var(--green-ink); font-we
 .list .bad, .sub .bad { color: var(--red); font-weight: 600; }
 .badge.tab-dot { top: 1px; right: 7px; min-width: 10px; width: 10px; height: 10px; padding: 0; border: 2px solid var(--surface); box-sizing: content-box; }
 .badge.tab-dot.amber { background: #d48a14; }
+
+/* ---------- pantalla ancha (PC): menú lateral, contenido centrado más ancho y fichas en dos columnas */
+p:has(> .btn.block) + p:has(> .btn.block) { margin-top: 10px; }
+.temp-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 340px), 1fr)); gap: 0 16px; }
+@media (min-width: 1000px) {
+  :root { --side-w: 232px; --content-w: 1160px; }
+  .tabbar {
+    top: var(--top-h); bottom: 0; right: auto; width: var(--side-w); height: auto;
+    flex-direction: column; gap: 4px; padding: 18px 12px;
+    border-top: 0; border-right: 1px solid var(--line);
+  }
+  .tabbar a { flex: 0 0 auto; flex-direction: row; justify-content: flex-start; gap: 12px; height: 48px; padding: 0 10px; border-radius: 12px; font-size: 15px; }
+  .tabbar .ind { width: 34px; height: 34px; }
+  .tabbar a[aria-current="page"] { background: var(--green-bg); }
+  .tabbar a[aria-current="page"] .ind { background: transparent; }
+  .tabbar a:hover { background: var(--gray-bg); color: var(--ink); }
+  .tabbar a[aria-current="page"]:hover { background: var(--green-bg); }
+  .tabbar .tab-label { overflow: visible; letter-spacing: 0; }
+  .badge.tab-dot { right: 2px; }
+  main {
+    max-width: var(--content-w);
+    margin: 0 0 0 max(var(--side-w), calc(var(--side-w) + (100vw - var(--side-w) - var(--content-w)) / 2));
+    padding: 24px 40px 120px;
+  }
+  .search { margin: -24px -40px 0; padding: 14px 40px; }
+  .fab { right: max(32px, calc((100vw - var(--side-w) - var(--content-w)) / 2 + 40px)); bottom: 32px; }
+  #toast { left: calc(50% + var(--side-w) / 2); bottom: 40px; }
+  /* Inicio: tablero en dos columnas */
+  main[data-view="inicio"] { columns: 2; column-gap: 28px; }
+  main[data-view="inicio"] > * { break-inside: avoid; }
+  main[data-view="inicio"] > .reminder { column-span: all; margin-bottom: 18px; }
+  main[data-view="inicio"] > section { display: inline-block; width: 100%; margin-bottom: 22px; }
+  main[data-view="inicio"] > section > h2 { margin-top: 4px; }
+}
+@media (min-width: 1280px) {
+  /* Formularios largos y fichas del almacén: apartados en dos columnas */
+  main > form.form:is([data-form="material"], [data-form="packaging"], [data-form="formula"], [data-form="guide"], [data-form="settings"]) { display: block; columns: 2; column-gap: 28px; }
+  main > form.form:is([data-form="material"], [data-form="packaging"], [data-form="formula"], [data-form="guide"], [data-form="settings"]) > * { break-inside: avoid; margin: 0 0 18px; }
+  main > form.form:is([data-form="material"], [data-form="packaging"], [data-form="formula"], [data-form="guide"], [data-form="settings"]) > :is([data-formmsg], [data-need-legend]) { column-span: all; }
+  main > form.form:is([data-form="material"], [data-form="packaging"], [data-form="formula"], [data-form="guide"], [data-form="settings"]) > section > h2:first-child { margin-top: 4px; }
+  main:is([data-view="materias"], [data-view="envases"])[data-depth="detail"] { columns: 2; column-gap: 28px; }
+  main:is([data-view="materias"], [data-view="envases"])[data-depth="detail"] > * { break-inside: avoid; }
+  main:is([data-view="materias"], [data-view="envases"])[data-depth="detail"] > :first-child { column-span: all; margin-bottom: 8px; }
+  main:is([data-view="materias"], [data-view="envases"])[data-depth="detail"] > section { display: inline-block; width: 100%; }
+}
+
+/* ---------- comprobación de la sincronización */
+ol.check-list { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 10px; }
+ol.check-list li { display: grid; grid-template-columns: 26px 1fr; gap: 10px; align-items: start; }
+ol.check-list p { margin-top: 2px; color: var(--muted); font-size: 14px; overflow-wrap: anywhere; }
+ol.check-list code { font-size: 13px; background: var(--gray-bg); padding: 1px 5px; border-radius: 4px; }
+.check-mark { display: grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; font-weight: 700; font-size: 14px; background: var(--gray-bg); color: var(--muted); }
+li.ok .check-mark { background: var(--green-bg); color: var(--green-ink); }
+li.bad .check-mark { background: var(--red-bg); color: var(--red); }
+li.warn .check-mark { background: var(--amber-bg); color: var(--amber); }
+li.bad strong { color: var(--red); }

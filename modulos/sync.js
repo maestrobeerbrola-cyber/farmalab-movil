@@ -528,8 +528,13 @@ async function viewSync() {
         ${snap ? '<button class="btn danger-outline" type="button" data-act="syncRemove">Quitar la sincronización de este dispositivo</button>' : ''}
       </div></section>
     </form>
+    <section><h2>Comprobar la sincronización</h2><div class="panel stack">
+      <p>Revisa paso a paso la configuración, la cuenta, Google Drive y el último envío, y hace una sincronización de prueba. Hazlo en el móvil y en el PC: los dos deben ver el mismo archivo y lo que ha enviado el otro.</p>
+      <button class="btn secondary" type="button" data-act="syncCheck">Comprobar ahora</button>
+      <div id="syncCheckOut"></div>
+    </div></section>
     <section><h2>Qué se sincroniza</h2><div class="panel stack">
-      <p>Materias primas, acondicionamiento, fórmulas, PNT, bibliografía, elaboraciones, sus documentos adjuntos, los ajustes de la farmacia y el registro de actividad.</p>
+      <p>Materias primas, acondicionamiento, fórmulas, PNT, bibliografía, elaboraciones, temperaturas e incidencias, sus documentos adjuntos, los ajustes de la farmacia y el registro de actividad.</p>
       <p><strong>Las recetas no se sincronizan:</strong> llevan datos de pacientes y se quedan solo en el dispositivo donde se adjuntaron. Tampoco el PIN.</p>
       <p>Al sincronizar no se borra nada, salvo lo que el otro equipo haya borrado por fin del plazo de conservación. Si los dos equipos cambian lo mismo, se queda el cambio más reciente.</p>
       <p class="hint">Antes de dar un número de lote, la app sincroniza para no repetirlo con el otro equipo. Las copias de seguridad siguen siendo recomendables.</p>
@@ -548,8 +553,90 @@ SETTINGS_SECTIONS.push(async () => {
   return `<section><h2>Sincronización móvil y PC</h2><ul class="list"><li><a class="row" href="#sincronizacion"><span class="row-main"><strong>Google Drive</strong><span class="sub"><span>${esc(line)}</span></span></span></a></li></ul></section>`;
 });
 
+// ------------------------------------------------------------------ comprobación paso a paso
+/*
+ * Diagnóstico para la prueba real con Google: cada paso dice si está bien y, si no, qué hacer.
+ * Se lanza al tocar un botón, así que puede abrir la ventana de Google si hace falta.
+ */
+async function runSyncCheck(out) {
+  const steps = [];
+  const paint = () => {
+    out.innerHTML = `<ol class="check-list">${steps.map((x) => `<li class="${x.tone}"><span class="check-mark" aria-hidden="true">${x.tone === 'ok' ? '✓' : x.tone === 'bad' ? '✕' : x.tone === 'run' ? '…' : '!'}</span><div><strong>${esc(x.title)}</strong>${x.text ? `<p>${x.text}</p>` : ''}</div></li>`).join('')}</ol>`;
+  };
+  const step = (title) => { const x = { title, tone: 'run', text: '' }; steps.push(x); paint(); return x; };
+  const done = (x, tone, text) => { x.tone = tone; x.text = text; paint(); return tone !== 'bad'; };
+  const cfg = (await metaGet('syncConfig')) || {};
+  let x = step('Configuración de este dispositivo');
+  if (!EMAIL_RE.test(str(cfg.account)) || !CLIENT_ID_RE.test(str(cfg.client_id))) {
+    return done(x, 'bad', 'Falta la cuenta de Google o el ID de cliente, o no tienen el formato correcto. Rellénalos abajo, en «Configuración», con los mismos datos en el móvil y en el PC.');
+  }
+  done(x, 'ok', `Cuenta ${esc(cfg.account)}. ID de cliente ${esc(cfg.client_id.split('-')[0])}-….apps.googleusercontent.com. Este dispositivo: <code>${esc(String(state.deviceId || '').slice(0, 8))}</code>.`);
+  x = step('Dirección de la app');
+  done(x, location.protocol === 'https:' || location.hostname === 'localhost' ? 'ok' : 'warn',
+    `En Google Cloud, el cliente debe tener como origen autorizado <code>${esc(location.origin)}</code> y como URI de redirección <code>${esc(redirectUri())}</code>. Si no coinciden, Google responde «redirect_uri_mismatch» u «origin_mismatch».`);
+  x = step('Conexión a internet');
+  if (!navigator.onLine) return done(x, 'bad', 'Este dispositivo no tiene conexión. Conéctalo y repite la comprobación.');
+  done(x, 'ok', 'Hay conexión.');
+  x = step('Inicio de sesión de Google');
+  try { await loadGis(); } catch (err) { return done(x, 'bad', `${esc(err.message)} Si usas un bloqueador de anuncios o de rastreadores, permite accounts.google.com.`); }
+  let token = await syncToken();
+  if (token && (token.client_id !== cfg.client_id || normEmail(token.account) !== normEmail(cfg.account))) token = null;
+  if (!token) {
+    try { token = await requestToken({ ...cfg }); } catch (err) {
+      return done(x, 'bad', `${esc(err.message)} Si Google enseña «Acceso bloqueado: … no ha completado el proceso de verificación» con «Error 403: access_denied», la cuenta no está en la lista de usuarios de prueba: en Google Cloud → Google Auth Platform → Público → Usuarios de prueba, añade <strong>${esc(cfg.account)}</strong> (o pulsa «Publicar app»). Si dice «invalid_client», el ID de cliente está mal copiado.`);
+    }
+  }
+  done(x, 'ok', `Sesión abierta con ${esc(token.account)} (comprobado con Google Drive).`);
+  x = step('Google Drive');
+  let files;
+  try { files = await listRemote(token); } catch (err) { return done(x, 'bad', esc(err.message)); }
+  const dataFiles = files.filter((f) => f.name === SYNC_FILE);
+  const docs = files.filter((f) => f.name.startsWith(SYNC_DOC_PREFIX)).length;
+  done(x, 'ok', `La carpeta oculta de FARMA·LAB responde: ${dataFiles.length ? 'tiene el archivo de datos' : 'aún sin archivo de datos'}${docs ? ` y ${docs} ${docs === 1 ? 'documento' : 'documentos'}` : ''}.`);
+  x = step('Último envío');
+  if (!dataFiles.length) {
+    done(x, 'warn', 'Todavía no hay datos en Drive. La sincronización de prueba de abajo los enviará desde este dispositivo.');
+  } else {
+    let p = null;
+    try { p = JSON.parse(new TextDecoder().decode(await downloadBytes(token, dataFiles[0].id))); } catch { /* dañado */ }
+    if (!p || p.formato !== SYNC_FORMAT) {
+      done(x, 'warn', 'El archivo de Drive está dañado o es de otra app. La sincronización de prueba lo sustituirá.');
+    } else {
+      const mine = p.dispositivo === state.deviceId;
+      const records = STORES.filter((st) => st !== 'audit').reduce((n, st) => n + (Array.isArray(p.datos && p.datos[st]) ? p.datos[st].length : 0), 0);
+      const newer = Number(p.version_formato) > SYNC_FORMAT_VERSION;
+      const older = Number(p.version_formato) < SYNC_FORMAT_VERSION;
+      done(x, newer ? 'bad' : older ? 'warn' : 'ok',
+        `${p.actualizado ? `El ${esc(fmtStamp(p.actualizado))}` : 'Sin fecha'}, desde ${mine ? 'este dispositivo' : `el otro equipo (<code>${esc(String(p.dispositivo || '').slice(0, 8))}</code>)`} con ${esc(p.app || 'FARMA·LAB')}: ${records} registros.`
+        + (newer ? ' El otro equipo tiene una versión más nueva de FARMA·LAB: actualiza este dispositivo (Ajustes → Acerca de, o recarga la app).' : '')
+        + (older ? ' Lo envió una versión anterior de FARMA·LAB: actualiza el otro equipo para que no deje de sincronizar.' : ''));
+      if (newer) return false;
+    }
+  }
+  x = step('Sincronización de prueba');
+  try {
+    const r = await syncNow({ interactive: true });
+    done(x, 'ok', `${esc(syncResultText(r))} Repite la comprobación en el otro equipo: en «Último envío» debe salir este dispositivo (<code>${esc(String(state.deviceId || '').slice(0, 8))}</code>).`);
+  } catch (err) {
+    return done(x, 'bad', esc(err.message));
+  }
+  return true;
+}
+
 // ------------------------------------------------------------------ acciones y formulario
 Object.assign(ACTIONS, {
+  syncCheck: async (el) => {
+    const out = $('#syncCheckOut');
+    if (!out) return;
+    el.disabled = true;
+    try {
+      const good = await runSyncCheck(out);
+      toast(good ? 'Comprobación terminada: todo correcto.' : 'Comprobación terminada: hay algo que revisar.');
+      updateSyncButton();
+    } finally {
+      el.disabled = false;
+    }
+  },
   syncNow: async () => {
     if (!(await syncConfig())) { location.hash = '#sincronizacion'; return; }
     let r;

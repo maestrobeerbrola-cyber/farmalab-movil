@@ -1,11 +1,11 @@
 /* FARMA·LAB móvil — service worker: guarda la app para usarla sin conexión.
    Al publicar una versión nueva, cambia VERSION (y APP_VERSION en app.js). */
-const VERSION = '0.3.20';
+const VERSION = '0.3.21';
 const CACHE = `farmalab-movil-${VERSION}`;
 // Imprescindibles: si falta alguno, no se instala esta versión.
 const CORE = ['./', './index.html', './app.js', './styles.css', './manifest.webmanifest',
-  './modulos/documentos.js', './modulos/almacen.js', './modulos/formulas.js', './modulos/elaborar.js', './modulos/calculadora.js', './modulos/precios.js', './modulos/ficha.js', './modulos/conservacion.js', './modulos/sync.js', './modulos/temperaturas.js',
-  './datos/tabla1-principios-activos.json', './datos/precio-tasado-2026.json'];
+  './modulos/documentos.js', './modulos/almacen.js', './modulos/formulas.js', './modulos/elaborar.js', './modulos/calculadora.js', './modulos/precios.js', './modulos/ficha.js', './modulos/conservacion.js', './modulos/sync.js', './modulos/temperaturas.js', './modulos/estado.js',
+  './datos/tabla1-principios-activos.json', './datos/precio-tasado-2026.json', './datos/fn-materias-primas.json'];
 // Complementos: si alguno falla, la app funciona igual y se guardará cuando se use.
 const EXTRA = [
   './icons/icon-192.png', './icons/icon-512.png', './icons/icon-maskable-512.png', './icons/apple-touch-icon.png',

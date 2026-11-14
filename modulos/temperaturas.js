@@ -116,7 +116,7 @@ async function viewTemperatures(key) {
   const month = all.filter((r) => monthKeyOf(r.date) === key).reverse();
   const next = shiftMonth(key, 1);
   return `<p class="hint intro">PN/L/PG/009/00: al menos una lectura al día de la temperatura actual, la máxima y la mínima. Los días no laborables se anotan la máxima y la mínima a primera hora del primer día hábil. Después de anotarlas, pon a cero los fiadores del termómetro.</p>
-    ${cards}
+    <div class="temp-cards">${cards}</div>
     <section><h2>Incidencias</h2>
       ${open.length ? `<ul class="list">${open.map((i) => `<li><a class="row" href="#temperaturas--incidencia--${esc(i.uuid)}"><div class="row-main"><strong>Incidencia ${esc(i.code)} · ${esc(i.point_name)}</strong><span class="sub"><span>${fmtDay(i.detected_date)}</span><span>${esc(i.temp_reached || '')}</span></span></div>${pill('temp_incident', i.status)}</a></li>`).join('')}</ul>
         <p class="msg warn">No dispenses los productos afectados hasta que el farmacéutico compruebe que la desviación no afecta a su calidad, seguridad y eficacia.</p>` : '<p class="hint">No hay incidencias abiertas.</p>'}
