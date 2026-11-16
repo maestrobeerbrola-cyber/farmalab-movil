@@ -24,7 +24,7 @@ const DRIVE_UPLOAD = 'https://www.googleapis.com/upload/drive/v3';
 const SYNC_FILE = 'farmalab-sincronizacion.json';
 const SYNC_DOC_PREFIX = 'doc-';
 const SYNC_FORMAT = 'farmalab-sincronizacion';
-const SYNC_FORMAT_VERSION = 2;   // 2: temperaturas (un equipo sin actualizar no las borraría del archivo)
+const SYNC_FORMAT_VERSION = 3;   // 2: temperaturas · 3: balanzas (un equipo sin actualizar no las borraría del archivo)
 const SYNC_TICK_MS = 30 * 1000;           // cada 30 s se mira si hay cambios que enviar
 const SYNC_PULL_MS = 5 * 60 * 1000;       // y cada 5 min se traen los del otro equipo
 const SYNC_STALE_MS = 60 * 60 * 1000;     // sin sincronizar en 1 h: el botón se marca
@@ -534,7 +534,7 @@ async function viewSync() {
       <div id="syncCheckOut"></div>
     </div></section>
     <section><h2>Qué se sincroniza</h2><div class="panel stack">
-      <p>Materias primas, acondicionamiento, fórmulas, PNT, bibliografía, elaboraciones, temperaturas e incidencias, sus documentos adjuntos, los ajustes de la farmacia y el registro de actividad.</p>
+      <p>Materias primas, acondicionamiento, fórmulas, PNT, bibliografía, elaboraciones, temperaturas e incidencias, balanzas y sus calibraciones, sus documentos adjuntos, los ajustes de la farmacia y el registro de actividad.</p>
       <p><strong>Las recetas no se sincronizan:</strong> llevan datos de pacientes y se quedan solo en el dispositivo donde se adjuntaron. Tampoco el PIN.</p>
       <p>Al sincronizar no se borra nada, salvo lo que el otro equipo haya borrado por fin del plazo de conservación. Si los dos equipos cambian lo mismo, se queda el cambio más reciente.</p>
       <p class="hint">Antes de dar un número de lote, la app sincroniza para no repetirlo con el otro equipo. Las copias de seguridad siguen siendo recomendables.</p>

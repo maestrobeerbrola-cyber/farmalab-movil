@@ -6,12 +6,12 @@
  * sincronizarlo más adelante con la versión de PC.
  */
 
-const APP_VERSION = '0.3.24';
+const APP_VERSION = '0.3.25';
 const PREVIEW = document.documentElement.dataset.preview === '1'; // copia de prueba publicada en Claude
 const DB_NAME = 'farmalab-movil';
 const EXPORT_FORMAT = 'farmalab-datos';
-const EXPORT_FORMAT_VERSION = 4;          // 3: acondicionamiento, bibliografía, documentos de cualquier ficha y ajustes · 4: temperaturas
-const DB_VERSION = 4;                     // 3: acondicionamiento, bibliografía, documentos genéricos, estados de elaboración · 4: temperaturas
+const EXPORT_FORMAT_VERSION = 5;          // 3: acondicionamiento, bibliografía, documentos de cualquier ficha y ajustes · 4: temperaturas · 5: balanzas
+const DB_VERSION = 5;                     // 3: acondicionamiento, bibliografía, documentos genéricos, estados de elaboración · 4: temperaturas · 5: balanzas
 const FILE_STORE = 'pnt_file';            // documentos adjuntos (PNT, materias primas, acondicionamiento, bibliografía)
 const MAX_DOC_BYTES = 25 * 1048576;
 const DOC_TYPES = {
@@ -24,14 +24,14 @@ const DOC_TYPES = {
 };
 // En todos los adjuntos: PDF, Word o foto (cámara del móvil o imagen guardada).
 const DOC_ACCEPT = '.pdf,.docx,.doc,.jpg,.jpeg,.png,.webp,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/msword,image/jpeg,image/png,image/webp';
-const DOC_KINDS = { documento: 'Documento', boletin: 'Boletín de análisis', fds: 'Ficha de datos de seguridad', especificaciones: 'Especificaciones', otro: 'Otro', receta: 'Receta' };
+const DOC_KINDS = { documento: 'Documento', boletin: 'Boletín de análisis', fds: 'Ficha de datos de seguridad', especificaciones: 'Especificaciones', certificado: 'Certificado de calibración', manual: 'Manual de instrucciones', otro: 'Otro', receta: 'Receta' };
 const RECETA_ACCEPT = DOC_ACCEPT;
 /**
  * Las recetas llevan datos del paciente y del prescriptor: se guardan solo en este dispositivo
  * (local_only), no van en las copias ni en la sincronización, y su nombre de archivo no pasa al registro de actividad.
  */
 const isLocalOnly = (f) => Boolean(f && (f.local_only || f.kind === 'receta'));
-const STORES = ['material', 'packaging', 'formula', 'pnt', 'biblio', 'production', 'temperature', 'temp_incident', 'audit'];
+const STORES = ['material', 'packaging', 'formula', 'pnt', 'biblio', 'production', 'temperature', 'temp_incident', 'balance', 'balance_check', 'audit'];
 const LOCK_HIDDEN_MS = 5 * 60 * 1000;   // bloqueo tras 5 min con la app en segundo plano
 const LOCK_IDLE_MS = 15 * 60 * 1000;    // o tras 15 min sin tocar la pantalla
 const PBKDF2_ITERATIONS = 200000;
@@ -116,6 +116,8 @@ const SECTIONS = {
   registroac: { title: 'Registro de acondicionamiento', tab: 1 },
   temperaturas: { title: 'Temperaturas', tab: 4 },
   registrotemp: { title: 'Registro de temperaturas', tab: 4 },
+  balanzas: { title: 'Balanzas', tab: 4 },
+  registrobal: { title: 'Registro de balanzas', tab: 4 },
   fichaenv: { title: 'Registro de envase', tab: 1 },
   etiquetaestado: { title: 'Etiquetas de estado', tab: 1 },
   pnt: { title: 'PNT', tab: 5 },
@@ -154,7 +156,7 @@ const DEFAULT_SETTINGS = {
   // años de conservación desde la caducidad y días de aviso antes de borrar
   retention: { enabled: true, production: { general: 1, psicotropo: 2, estupefaciente: 5, veterinaria: 5 }, material: 1, packaging: 1, notice_days: 30 },
   // PNT de recepción, control de conformidad y almacenamiento de materias primas (Formulario Nacional)
-  fn: { mp_code: 'PN/L/PG/005/00', mp_related: '', pack_code: 'PN/L/PG/006/00', pack_related: '', temp_code: 'PN/L/PG/009/00', temp_related: '', guide_code: 'RD 175/2001', guide_related: '' },
+  fn: { mp_code: 'PN/L/PG/005/00', mp_related: '', pack_code: 'PN/L/PG/006/00', pack_related: '', temp_code: 'PN/L/PG/009/00', temp_related: '', bal_code: 'PN/L/OF/001/00', bal_related: '', guide_code: 'RD 175/2001', guide_related: '' },
   temp: { points: DEFAULT_TEMP_POINTS },
   updated_at: '',
 };
@@ -425,6 +427,8 @@ function normalizeSettings(stored) {
   if (!str(s.fn.pack_code)) s.fn.pack_code = DEFAULT_SETTINGS.fn.pack_code;
   if (!str(s.fn.temp_code)) s.fn.temp_code = DEFAULT_SETTINGS.fn.temp_code;
   if (!str(s.fn.guide_code)) s.fn.guide_code = DEFAULT_SETTINGS.fn.guide_code;
+  if (!str(s.fn.bal_code)) s.fn.bal_code = DEFAULT_SETTINGS.fn.bal_code;
+  if (typeof s.fn.bal_related !== 'string') s.fn.bal_related = '';
   const points = (saved.temp && Array.isArray(saved.temp.points) ? saved.temp.points : []).filter(validTempPoint);
   s.temp = { points: (points.length ? points : DEFAULT_TEMP_POINTS).map((p) => ({ id: p.id, name: str(p.name).slice(0, 60), kind: p.kind, min: p.min, max: p.max })) };
   return s;
@@ -478,13 +482,14 @@ const ICON = {
   x: svg('<path d="M6 6l12 12M18 6 6 18"/>'),
   calc: svg('<rect x="5" y="3" width="14" height="18" rx="2"/><path d="M8 7h8M8.5 11h.01M12 11h.01M15.5 11h.01M8.5 14.5h.01M12 14.5h.01M15.5 14.5h.01M8.5 18h.01M12 18h3.5"/>'),
   box: svg('<path d="M3.5 7.5 12 3l8.5 4.5v9L12 21l-8.5-4.5z"/><path d="M3.5 7.5 12 12l8.5-4.5M12 12v9"/>'),
+  gauge: svg('<path d="M4.5 16.5a8 8 0 1 1 15 0"/><path d="M12 15.5l3.6-4.6"/><circle cx="12" cy="16" r="1.4"/><path d="M7 19.5h10"/>'),
   thermo: svg('<path d="M14 14.76V5a2 2 0 0 0-4 0v9.76a4 4 0 1 0 4 0z"/><path d="M12 9.5v7"/>'),
   book: svg('<path d="M5 4.5A1.5 1.5 0 0 1 6.5 3H19v15H6.5A1.5 1.5 0 0 0 5 19.5z"/><path d="M5 19.5A1.5 1.5 0 0 0 6.5 21H19v-3"/>'),
   tag: svg('<path d="M3 12V4h8l9.5 9.5-8 8z"/><circle cx="7.5" cy="8.5" r="1.5"/>'),
   ext: svg('<path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>'),
   sync: svg('<path d="M7 18.5H6.5a4 4 0 0 1-.6-7.96A5.5 5.5 0 0 1 16.6 9a3.75 3.75 0 0 1 .9 7.4"/><path d="M15 13.5l-3-3-3 3M12 10.5V20"/>'),
 };
-const TABS = [['#inicio', 'Inicio', ICON.home], ['#materias', 'Almacén', ICON.box], ['#formulas', 'Fórmulas', ICON.flask], ['#elaboraciones', 'Elaborar', ICON.scale], ['#temperaturas', 'Temperatura', ICON.thermo], ['#pnt', 'Documentos', ICON.doc]];
+const TABS = [['#inicio', 'Inicio', ICON.home], ['#materias', 'Almacén', ICON.box], ['#formulas', 'Fórmulas', ICON.flask], ['#elaboraciones', 'Elaborar', ICON.scale], ['#temperaturas', 'Controles', ICON.gauge], ['#pnt', 'Documentos', ICON.doc]];
 // Punto de aviso en una pestaña (p. ej. temperatura sin registrar hoy o fuera de rango), por su enlace.
 const TAB_BADGES = { '#temperaturas': 'tempBadge' };
 
@@ -826,7 +831,7 @@ async function renderRoute() {
   view.dataset.view = sec || 'inicio';
   view.dataset.depth = (!arg || arg === 'archivo') ? 'root' : (extra === 'editar' || ['nueva', 'nuevo'].includes(arg)) ? 'form' : 'detail';
   $('#title').textContent = info.title;
-  const sub = Boolean(arg) || ['ajustes', 'auditoria', 'papelera', 'conservacion', 'sincronizacion', 'calculadora', 'valoracion', 'etiqueta', 'registromp', 'registroac', 'registrotemp', 'etiquetaestado'].includes(sec);
+  const sub = Boolean(arg) || ['ajustes', 'auditoria', 'papelera', 'conservacion', 'sincronizacion', 'calculadora', 'valoracion', 'etiqueta', 'registromp', 'registroac', 'registrotemp', 'registrobal', 'etiquetaestado'].includes(sec);
   $('#backBtn').hidden = !sub;
   $('#mark').hidden = sub;
   $$('.tabbar a').forEach((a, i) => {
@@ -1031,6 +1036,10 @@ async function viewSettings() {
         ${field('Procedimientos relacionados', text('fn_temp_related', `value="${esc(s.fn.temp_related)}" maxlength="120"`), 'Opcional.')}
       </div>
       <div class="grid2">
+        ${field('PNT de balanzas', text('fn_bal_code', `value="${esc(s.fn.bal_code)}" maxlength="40"`), 'Formulario Nacional: PN/L/OF/001/00 (Pesada). Puedes poner el de vuestro PNT de calibración.')}
+        ${field('Procedimientos relacionados', text('fn_bal_related', `value="${esc(s.fn.bal_related)}" maxlength="120"`), 'Opcional.')}
+      </div>
+      <div class="grid2">
         ${field('Código de la ficha de registro (ficha 2)', text('fn_guide_code', `value="${esc(s.fn.guide_code)}" maxlength="40"`), 'Por defecto, RD 175/2001. Puedes poner el de vuestro PNT.')}
         ${field('Procedimientos relacionados', text('fn_guide_related', `value="${esc(s.fn.guide_related)}" maxlength="120"`), 'Se añaden a los PNT de la fórmula.')}
       </div>
@@ -1119,7 +1128,7 @@ async function exportBackup(share) {
 }
 
 const ID_RE = /^(?=.{8,64}$)[A-Za-z0-9]+(-[A-Za-z0-9]+)*$/;
-const OWNER_TYPES = ['pnt', 'material', 'packaging', 'biblio'];   // dueños de documentos que viajan en las copias
+const OWNER_TYPES = ['pnt', 'material', 'packaging', 'biblio', 'balance'];   // dueños de documentos que viajan en las copias
 /** Datos de un documento recibido (copia o sincronización): true si se pueden usar. Las recetas nunca viajan. */
 function docMetaOk(r) {
   if (!r || typeof r !== 'object' || !ID_RE.test(String(r.uuid))) return false;
@@ -1163,6 +1172,8 @@ function validRecord(store, r) {
       && r.weighings.every((w) => w && s(w.ingredient) && isNum(w.theoretical) && optNum(w.actual));
     case 'temperature': return s(r.point_id) && isDay(r.date) && isNum(r.actual) && optNum(r.max) && optNum(r.min);
     case 'temp_incident': return s(r.code) && s(r.point_id);
+    case 'balance': return s(r.name) && optNum(r.max_g) && optNum(r.interval_days);
+    case 'balance_check': return ID_RE.test(String(r.balance_uuid)) && ['interna', 'externa'].includes(r.kind) && isDay(r.date);
     case 'audit': return s(r.action);
     default: return false;
   }
@@ -1562,6 +1573,7 @@ const FORMS = {
         mp_code: str(d.fn_mp_code).slice(0, 40) || DEFAULT_SETTINGS.fn.mp_code, mp_related: str(d.fn_mp_related).slice(0, 120),
         pack_code: str(d.fn_pack_code).slice(0, 40) || DEFAULT_SETTINGS.fn.pack_code, pack_related: str(d.fn_pack_related).slice(0, 120),
         temp_code: str(d.fn_temp_code).slice(0, 40) || DEFAULT_SETTINGS.fn.temp_code, temp_related: str(d.fn_temp_related).slice(0, 120),
+        bal_code: str(d.fn_bal_code).slice(0, 40) || DEFAULT_SETTINGS.fn.bal_code, bal_related: str(d.fn_bal_related).slice(0, 120),
         guide_code: str(d.fn_guide_code).slice(0, 40) || DEFAULT_SETTINGS.fn.guide_code, guide_related: str(d.fn_guide_related).slice(0, 120),
       },
       retention,

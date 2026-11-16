@@ -118,7 +118,7 @@ Object.assign(FORMS, {
 });
 
 // ------------------------------------------------------------------ visor de documentos
-const OWNER_ROUTE = { pnt: 'pnt', material: 'materias', packaging: 'envases', biblio: 'biblio', production: 'elaboraciones' };
+const OWNER_ROUTE = { pnt: 'pnt', material: 'materias', packaging: 'envases', biblio: 'biblio', production: 'elaboraciones', balance: 'balanzas' };
 async function ownerLabel(doc) {
   const store = doc.owner_type || 'pnt';
   const o = await getOne(store, doc.owner_uuid || doc.pnt_uuid);

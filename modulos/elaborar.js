@@ -178,7 +178,8 @@ async function viewProduction(id) {
   const stale = staleDays(p);
   const qc = p.qc || {};
   const tests = (qc.tests && qc.tests.length) ? qc.tests : s.qc_tests.map((t) => ({ test: t }));
-  const equipment = [...new Set([...(s.equipment || []), ...(p.equipment || [])])];
+  const equipment = [...new Set([...(await balanceEquipment(s.equipment || [])), ...(p.equipment || [])])];
+  const balNotes = await balanceGuideNotes();
   const tasado = p.cn ? await tasadoFor(p.cn.cn) : null;
   const retFact = await retentionFact('production', p);
 
@@ -255,7 +256,7 @@ async function viewProduction(id) {
     <section><h2>Utillaje utilizado</h2><div class="panel checks" data-equipment>
       ${equipment.map((e) => checkbox('equipment', esc(e), (p.equipment || []).includes(e), `value="${esc(e)}"`)).join('')}
       ${field('Otro utillaje', text('equipment_other', 'maxlength="200" placeholder="Separado por comas"'))}
-    </div></section>
+    </div>${balNotes ? `<div class="bal-notes">${balNotes}</div>` : ''}</section>
     <section><h2>Control de calidad</h2><div class="panel form">
       <div data-rows="qc">${tests.map((t) => qcRow(t)).join('')}</div>
       <button type="button" class="btn secondary small" data-act="addRow" data-kind="qc">${ICON.plus}Añadir prueba</button>

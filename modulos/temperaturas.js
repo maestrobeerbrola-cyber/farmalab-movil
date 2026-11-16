@@ -3,6 +3,7 @@
    y los registros en PDF: anexo II a) y b) (local), anexo III (nevera) y anexo IV (incidencias). */
 
 const TEMP_KINDS = { local: 'Local', nevera: 'Nevera' };
+const CONTROL_TABS = [['#temperaturas', 'Temperaturas'], ['#balanzas', 'Balanzas']];   // pestaña Controles
 const FN_TEMP_TITLE = 'Control y registro de temperaturas';
 // Escala de las rejillas del modelo: 10–35 ºC para el local (rango 20–30) y 0–11 ºC para la nevera (rango 2–8).
 const TEMP_SCALE = { local: { below: 10, count: 26 }, nevera: { below: 2, count: 12 } };
@@ -115,7 +116,7 @@ async function viewTemperatures(key) {
   const open = incidents.filter((i) => i.status !== 'cerrada').sort(byNewest);
   const month = all.filter((r) => monthKeyOf(r.date) === key).reverse();
   const next = shiftMonth(key, 1);
-  return `<p class="hint intro">PN/L/PG/009/00: al menos una lectura al día de la temperatura actual, la máxima y la mínima. Los días no laborables se anotan la máxima y la mínima a primera hora del primer día hábil. Después de anotarlas, pon a cero los fiadores del termómetro.</p>
+  return `${segmented(CONTROL_TABS, '#temperaturas')}<p class="hint intro">PN/L/PG/009/00: al menos una lectura al día de la temperatura actual, la máxima y la mínima. Los días no laborables se anotan la máxima y la mínima a primera hora del primer día hábil. Después de anotarlas, pon a cero los fiadores del termómetro.</p>
     <div class="temp-cards">${cards}</div>
     <section><h2>Incidencias</h2>
       ${open.length ? `<ul class="list">${open.map((i) => `<li><a class="row" href="#temperaturas--incidencia--${esc(i.uuid)}"><div class="row-main"><strong>Incidencia ${esc(i.code)} · ${esc(i.point_name)}</strong><span class="sub"><span>${fmtDay(i.detected_date)}</span><span>${esc(i.temp_reached || '')}</span></span></div>${pill('temp_incident', i.status)}</a></li>`).join('')}</ul>
@@ -732,7 +733,7 @@ NEEDED.tempIncident = {
 };
 
 // ------------------------------------------------------------------ Inicio, pestaña y avisos
-/** Punto en la pestaña Temperatura: rojo si hay algo fuera de rango o una incidencia abierta; ámbar si falta la lectura de hoy. */
+/** Punto en la pestaña Controles: rojo si hay algo fuera de rango, una incidencia abierta o una balanza fuera de uso; ámbar si falta la lectura de hoy o una calibración. */
 async function updateTempBadge() {
   const dot = $('#tempBadge');
   if (!dot) return;
@@ -742,10 +743,13 @@ async function updateTempBadge() {
   const red = open || readings.some((r) => outOfRange(r) && !r.incident_uuid);
   const today = todayIso();
   const pending = s.temp.points.filter((p) => !readings.some((r) => r.point_id === p.id && r.date === today));
-  dot.hidden = !red && !pending.length;
-  dot.classList.toggle('amber', !red);
+  const bal = typeof balanceTabTone === 'function' ? await balanceTabTone() : '';
+  const anyRed = red || bal === 'red';
+  dot.hidden = !anyRed && !pending.length && !bal;
+  dot.classList.toggle('amber', !anyRed);
+  const why = [red ? 'temperatura fuera de rango o incidencia abierta' : pending.length ? 'lectura de temperatura pendiente hoy' : '', bal === 'red' ? 'balanza fuera de uso o con la calibración externa vencida' : bal ? 'calibración de balanza pendiente' : ''].filter(Boolean);
   const tab = dot.closest('a');
-  if (tab) tab.setAttribute('aria-label', `Temperatura${red ? ': fuera de rango o incidencia abierta' : pending.length ? ': lectura pendiente hoy' : ''}`);
+  if (tab) tab.setAttribute('aria-label', `Controles${why.length ? `: ${why.join('; ')}` : ''}`);
 }
 AFTER_RENDER.push(() => { updateTempBadge().catch((err) => console.error(err)); });
 HOME_BLOCKS.push(async () => {

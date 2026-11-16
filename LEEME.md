@@ -1,4 +1,4 @@
-# FARMA·LAB móvil v0.3.24 (prototipo)
+# FARMA·LAB móvil v0.3.25 (prototipo)
 
 App que se instala desde Chrome o Edge (Android y Windows) y funciona sin conexión. Los datos se guardan **en el propio dispositivo** y, si se configura, se sincronizan entre el móvil y el PC a través de Google Drive.
 
@@ -14,6 +14,15 @@ App que se instala desde Chrome o Edge (Android y Windows) y funciona sin conexi
 - **Temperaturas** (PN/L/PG/009/00): lectura diaria del local y la nevera, incidencias y registro mensual en PDF.
 - **Documentos**: PNT y bibliografía con su PDF, Word o foto, que se consultan dentro de la app, también sin conexión.
 - Registro de actividad, bloqueo con PIN, exportar e importar copias.
+
+## Novedades de la v0.3.25
+- **Balanzas** (pestaña «Controles», antes «Temperatura»: Temperaturas | Balanzas). Ficha de cada balanza (fabricante, modelo, nº de serie, intervalo de pesada, legibilidad, tipo de ajuste interno o externo, cada cuántos días se calibra y cada cuántos años la calibra la empresa) con su certificado y su manual adjuntos.
+- **Calibración interna** en un minuto: fecha y hora, comprobaciones previas del PNT de pesada (nivelada, plato limpio, 30 minutos encendida, sin corrientes de aire), resultado conforme o no conforme, mensaje y medida tomada si falla, comprobación opcional con pesas (diferencia en mg en directo). Si no es conforme, la balanza queda **fuera de uso** hasta que otra calibración salga bien.
+- **Calibración externa**: empresa, nº de certificado, resultado y próxima fecha (propuesta a los años indicados).
+- **Avisos**: calibración interna pendiente al cumplirse el plazo, balanza fuera de uso, calibración externa a 60 días de vencer y vencida. Punto en la pestaña Controles.
+- **Guía de elaboración**: las balanzas registradas aparecen en el utillaje (en lugar de la genérica) con su estado; la ficha 2 anota «calibrada el …».
+- **Registro en PDF** (diseño del Formulario Nacional, PN/L/OF/001/00 «Pesada», configurable en Ajustes): anexo II «Listado de balanzas» y registro anual de calibraciones de cada balanza, con filas en blanco para anotar a mano.
+- Copias formato 5 y sincronización formato 3: actualiza los dos equipos (uno sin actualizar deja de sincronizar hasta hacerlo).
 
 ## Novedades de la v0.3.24
 - **Visor de documentos con zoom propio**: al ampliar un PNT, una ficha, un registro, una etiqueta o un documento subido, solo se amplía el documento dentro de su marco; la barra de arriba y la de abajo se quedan fijas. En el móvil: pellizcar o tocar dos veces (al ampliar aparecen los botones − / % / + para volver al 100 %). En el PC: botones − y +, Ctrl + rueda del ratón o doble clic. Al ampliar, la página a la vista se vuelve a pintar con más resolución para que se lea nítida; los Word se agrandan reorganizando el texto.

@@ -57,7 +57,7 @@ async function recordSheetData(p, extra) {
     composition: `${ws.map((w) => `${w.ingredient} ${fmtNum(w.theoretical)} ${w.unit}`).join(' · ')} — para ${fmtNum(p.target_amount)} ${p.unit}`,
     pnts: (p.pnt_refs || []).map((r) => `${r.code} · ${r.title} · versión ${r.version || '1'}`),
     method: str(p.method_notes),
-    equipment: (p.equipment || []).join(', '),
+    equipment: await balanceEquipmentText(p.equipment || [], p.elaborated_date),
     materials: ws.map((w) => {
       const m = w.material_uuid ? mats.get(w.material_uuid) : null;
       const tags = [w.role === 'activo' ? 'PA' : '', w.edo || edoMatch(w.ingredient) ? 'EDO' : ''].filter(Boolean).join(', ');

@@ -466,9 +466,17 @@ section > h2.need::after { content: " *"; color: var(--red); font-weight: 700; }
 .grid3 .withunit span { font-size: 14px; }
 .temp-point .panel > .list { margin: 8px 0 4px; }
 .temp-point .hint { margin: 2px 0 10px; }
+.temp-point .facts + p { margin-top: 14px; }
 .temp-form { margin-top: 4px; }
 details.more-reading { margin-top: 8px; }
 details.more-reading summary { cursor: pointer; color: var(--green-ink); font-weight: 600; padding: 6px 0; }
+/* Balanzas: comprobación con pesas y estado bajo el utillaje de la guía */
+.wrows { display: grid; gap: 8px; margin-top: 10px; }
+.wrow { align-items: center; }
+.wdiff { font-size: 14px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.wdiff.bad { color: var(--red); font-weight: 600; }
+.bal-notes { display: grid; gap: 8px; margin-top: 10px; }
+.bal-notes .msg, .bal-notes .hint { margin: 0; }
 .month-nav { display: flex; justify-content: space-between; gap: 8px; margin: 0 0 10px; }
 .tprow { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 44px; gap: 6px; align-items: center; padding: 10px 0; border-top: 1px solid var(--line); }
 .tprow input[name="tp_name"] { grid-column: 1 / 3; }
