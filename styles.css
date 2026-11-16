@@ -267,6 +267,12 @@ input[type="text"].display-input:focus { outline: none; border: 0; }
 .dialog-body p { color: var(--ink); }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 6px; }
 .dialog-actions .btn { flex: 1; }
+/* Ventana de avisos */
+.alert-pop { width: min(460px, calc(100% - 24px)); }
+.alert-pop .alerts { margin: 0 -8px; max-height: min(52vh, 420px); overflow-y: auto; }
+.ap-offer { display: grid; gap: 8px; padding: 12px; border-radius: 12px; background: var(--gray-bg); }
+.ap-offer p { margin: 0; }
+.ap-offer .btn { justify-self: start; }
 .banner.preview { background: #fff4c7; color: #5c4600; font-size: 14px; }
 
 /* ---------- documentos de PNT */

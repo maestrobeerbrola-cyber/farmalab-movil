@@ -1,4 +1,4 @@
-# FARMA·LAB móvil v0.3.25 (prototipo)
+# FARMA·LAB móvil v0.3.26 (prototipo)
 
 App que se instala desde Chrome o Edge (Android y Windows) y funciona sin conexión. Los datos se guardan **en el propio dispositivo** y, si se configura, se sincronizan entre el móvil y el PC a través de Google Drive.
 
@@ -14,6 +14,10 @@ App que se instala desde Chrome o Edge (Android y Windows) y funciona sin conexi
 - **Temperaturas** (PN/L/PG/009/00): lectura diaria del local y la nevera, incidencias y registro mensual en PDF.
 - **Documentos**: PNT y bibliografía con su PDF, Word o foto, que se consultan dentro de la app, también sin conexión.
 - Registro de actividad, bloqueo con PIN, exportar e importar copias.
+
+## Novedades de la v0.3.26
+- **Ventana de avisos** (pop-up): al abrir o desbloquear la app, y en cuanto aparece un aviso nuevo mientras se usa (stock bajo, caducidades, temperatura sin registrar, calibraciones, elaboraciones paradas…), sale una ventana con los avisos; tocando uno se va a su ficha. Lo nuevo sale en el momento y lo que sigue pendiente, una vez al día. Activa por defecto en el móvil; en el PC se activa en Ajustes.
+- **Notificaciones del teléfono**, también con la app cerrada: la app deja preparados los avisos de hoy y los que llegarán con los días (temperatura del día a partir de las 12:00, calibraciones, caducidades), y Chrome los comprueba en segundo plano una o dos veces al día (Android, con la app instalada). Se activan desde la propia ventana o en Ajustes → Avisos en este dispositivo, con un botón «Probar ahora».
 
 ## Novedades de la v0.3.25
 - **Balanzas** (pestaña «Controles», antes «Temperatura»: Temperaturas | Balanzas). Ficha de cada balanza (fabricante, modelo, nº de serie, intervalo de pesada, legibilidad, tipo de ajuste interno o externo, cada cuántos días se calibra y cada cuántos años la calibra la empresa) con su certificado y su manual adjuntos.
