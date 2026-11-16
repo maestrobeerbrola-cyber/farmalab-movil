@@ -1,4 +1,4 @@
-# FARMA·LAB móvil v0.3.26 (prototipo)
+# FARMA·LAB móvil v0.3.27 (prototipo)
 
 App que se instala desde Chrome o Edge (Android y Windows) y funciona sin conexión. Los datos se guardan **en el propio dispositivo** y, si se configura, se sincronizan entre el móvil y el PC a través de Google Drive.
 
@@ -14,6 +14,10 @@ App que se instala desde Chrome o Edge (Android y Windows) y funciona sin conexi
 - **Temperaturas** (PN/L/PG/009/00): lectura diaria del local y la nevera, incidencias y registro mensual en PDF.
 - **Documentos**: PNT y bibliografía con su PDF, Word o foto, que se consultan dentro de la app, también sin conexión.
 - Registro de actividad, bloqueo con PIN, exportar e importar copias.
+
+## Novedades de la v0.3.27
+- PC: el aviso de actualización (y el de vista previa) ya no queda tapado por el menú lateral. Revisados también en pantalla ancha los avisos flotantes, la ventana de avisos, los diálogos y el contenido de las pantallas principales: ninguno queda debajo del menú.
+- El recordatorio de copia de seguridad dice «este dispositivo» en lugar de «este teléfono» (también sale en el PC).
 
 ## Novedades de la v0.3.26
 - **Ventana de avisos** (pop-up): al abrir o desbloquear la app, y en cuanto aparece un aviso nuevo mientras se usa (stock bajo, caducidades, temperatura sin registrar, calibraciones, elaboraciones paradas…), sale una ventana con los avisos; tocando uno se va a su ficha. Lo nuevo sale en el momento y lo que sigue pendiente, una vez al día. Activa por defecto en el móvil; en el PC se activa en Ajustes.

@@ -518,6 +518,7 @@ p:has(> .btn.block) + p:has(> .btn.block) { margin-top: 10px; }
   }
   .search { margin: -24px -40px 0; padding: 14px 40px; }
   .fab { right: max(32px, calc((100vw - var(--side-w) - var(--content-w)) / 2 + 40px)); bottom: 32px; }
+  #shell > .banner, #banner > .banner { margin-left: var(--side-w); padding-left: 24px; }   /* aviso de actualización y de vista previa: a la derecha del menú lateral */
   #toast { left: calc(50% + var(--side-w) / 2); bottom: 40px; }
   /* Inicio: tablero en dos columnas */
   main[data-view="inicio"] { columns: 2; column-gap: 28px; }

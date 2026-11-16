@@ -6,7 +6,7 @@
  * sincronizarlo más adelante con la versión de PC.
  */
 
-const APP_VERSION = '0.3.26';
+const APP_VERSION = '0.3.27';
 const PREVIEW = document.documentElement.dataset.preview === '1'; // copia de prueba publicada en Claude
 const DB_NAME = 'farmalab-movil';
 const EXPORT_FORMAT = 'farmalab-datos';
@@ -909,7 +909,7 @@ async function viewHome() {
 
   let html = '';
   if (backup.remind) {
-    html += `<div class="msg warn reminder"><p><strong>Haz una copia de seguridad.</strong> ${backup.synced ? 'Tus datos se sincronizan con Google Drive, pero una copia propia permite volver atrás si algo se borra por error en los dos equipos' : 'Tus datos solo están en este teléfono'}${backup.lastExport ? `; la última copia es del ${esc(fmtStamp(backup.lastExport))}` : ' y aún no has hecho ninguna copia'}.</p><button class="btn small" data-act="export">Exportar copia</button></div>`;
+    html += `<div class="msg warn reminder"><p><strong>Haz una copia de seguridad.</strong> ${backup.synced ? 'Tus datos se sincronizan con Google Drive, pero una copia propia permite volver atrás si algo se borra por error en los dos equipos' : 'Tus datos solo están en este dispositivo'}${backup.lastExport ? `; la última copia es del ${esc(fmtStamp(backup.lastExport))}` : ' y aún no has hecho ninguna copia'}.</p><button class="btn small" data-act="export">Exportar copia</button></div>`;
   }
   if (state.deferredInstall && !standalone) {
     html += '<div class="msg ok reminder"><p>Instala FARMA·LAB para abrirla desde la pantalla de inicio y usarla sin conexión.</p><button class="btn small" data-act="install">Instalar</button></div>';
@@ -968,7 +968,7 @@ async function viewSettings() {
   const standalone = matchMedia('(display-mode: standalone)').matches;
   const ph = s.pharmacy;
   return `<section><h2>Copia de seguridad</h2><div class="panel stack">
-      <p>${backup.synced ? 'Tus datos están en este dispositivo y, sincronizados, en Google Drive. Una copia propia sigue siendo útil: permite volver atrás si algo se borra o se cambia por error en los dos equipos.' : 'Tus datos solo están en este teléfono. Si se pierde, se rompe o se borran los datos de Chrome, solo se podrán recuperar con una copia.'}</p>
+      <p>${backup.synced ? 'Tus datos están en este dispositivo y, sincronizados, en Google Drive. Una copia propia sigue siendo útil: permite volver atrás si algo se borra o se cambia por error en los dos equipos.' : 'Tus datos solo están en este dispositivo. Si se pierde, se rompe o se borran los datos de Chrome, solo se podrán recuperar con una copia.'}</p>
       <p><strong>Última copia:</strong> ${backup.lastExport ? esc(fmtStamp(backup.lastExport)) : 'ninguna todavía'}${backup.remind ? ' <span class="bad">(hay cambios sin copiar)</span>' : ''}</p>
       <div class="actions">
         <button class="btn" data-act="export">Exportar copia</button>
