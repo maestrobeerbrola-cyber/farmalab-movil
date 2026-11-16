@@ -28,7 +28,7 @@ const saveAlertPrefs = async (patch) => metaSet('alertPrefs', { ...(await alertP
 /** Avisos que se activarán con el paso de los días, con la misma clave que tendrán en Inicio. */
 async function alertForecasts() {
   const today = todayIso();
-  const [mats, packs, prods, balances, checks, s] = await Promise.all([getAll('material'), getAll('packaging'), getAll('production'), getAll('balance'), getAll('balance_check'), loadSettings()]);
+  const [mats, packs, prods, balances, checks, s] = await Promise.all([getAll('material'), getAll('packaging'), getLive('production'), getAll('balance'), getAll('balance_check'), loadSettings()]);
   const out = [];
   for (const [sec, r] of [...mats.map((m) => ['materias', m]), ...packs.map((p) => ['envases', p])]) {
     if (!isDay(r.expiry) || r.closure || ['rechazado', 'bloqueado'].includes(r.status) || !((r.quantity ?? 1) > 0)) continue;

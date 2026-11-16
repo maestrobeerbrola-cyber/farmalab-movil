@@ -1,4 +1,4 @@
-# FARMA·LAB móvil v0.3.27 (prototipo)
+# FARMA·LAB móvil v0.3.28 (prototipo)
 
 App que se instala desde Chrome o Edge (Android y Windows) y funciona sin conexión. Los datos se guardan **en el propio dispositivo** y, si se configura, se sincronizan entre el móvil y el PC a través de Google Drive.
 
@@ -14,6 +14,10 @@ App que se instala desde Chrome o Edge (Android y Windows) y funciona sin conexi
 - **Temperaturas** (PN/L/PG/009/00): lectura diaria del local y la nevera, incidencias y registro mensual en PDF.
 - **Documentos**: PNT y bibliografía con su PDF, Word o foto, que se consultan dentro de la app, también sin conexión.
 - Registro de actividad, bloqueo con PIN, exportar e importar copias.
+
+## Novedades de la v0.3.28
+- **Eliminar una elaboración en proceso** si finalmente no se elabora (botón «Eliminar la elaboración» al final de su guía). Todavía no tiene lote ni ha descontado stock, así que no deja huecos en la numeración. Pasa a la papelera (Ajustes → Papelera), donde se puede restaurar o **borrar del todo** junto con su receta. Las elaboradas no se eliminan: se rechazan, para que queden en el registro.
+- Una fórmula con elaboraciones en proceso pide terminarlas o eliminarlas antes de eliminar la fórmula.
 
 ## Novedades de la v0.3.27
 - PC: el aviso de actualización (y el de vista previa) ya no queda tapado por el menú lateral. Revisados también en pantalla ancha los avisos flotantes, la ventana de avisos, los diálogos y el contenido de las pantallas principales: ninguno queda debajo del menú.

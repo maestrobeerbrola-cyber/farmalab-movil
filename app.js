@@ -6,7 +6,7 @@
  * sincronizarlo más adelante con la versión de PC.
  */
 
-const APP_VERSION = '0.3.27';
+const APP_VERSION = '0.3.28';
 const PREVIEW = document.documentElement.dataset.preview === '1'; // copia de prueba publicada en Claude
 const DB_NAME = 'farmalab-movil';
 const EXPORT_FORMAT = 'farmalab-datos';
@@ -89,6 +89,9 @@ const ACTION_LABELS = {
   restaurar_formula: 'Fórmula restaurada',
   eliminar_pnt: 'PNT eliminado',
   restaurar_pnt: 'PNT restaurado',
+  eliminar_production: 'Elaboración en proceso eliminada',
+  restaurar_production: 'Elaboración restaurada',
+  borrado_definitivo_elaboracion: 'Elaboración borrada del todo',
   edicion_pnt: 'Edición de PNT',
   ficha_generada: 'Ficha de registro generada',
   ficha_mp_generada: 'Registro y especificaciones de materia prima generados',
@@ -348,8 +351,11 @@ const getAll = (s) => tx(s, 'readonly', (t) => t.objectStore(s).getAll());
  * Al ser un cambio más del registro, viaja en las copias y se aplica en el otro equipo al importarlas.
  */
 const getLive = async (s) => (await getAll(s)).filter((r) => !r.deleted_at);
-const DELETABLE = { formula: 'Fórmula', pnt: 'PNT' };
-const recordName = (store, r) => (store === 'pnt' ? `${r.code} ${r.title}` : `${r.name}${r.version ? ` (versión ${r.version})` : ''}`);
+const DELETABLE = { formula: 'Fórmula', pnt: 'PNT', production: 'Elaboración' };
+const DELETED_WHAT = { formula: 'fórmula', pnt: 'PNT', production: 'elaboración' };
+const DELETED_ROUTE = { formula: 'formulas', pnt: 'pnt', production: 'elaboraciones' };
+const delG = (store) => (store === 'pnt' ? 'o' : 'a');   // eliminado / eliminada
+const recordName = (store, r) => (store === 'pnt' ? `${r.code} ${r.title}` : store === 'production' ? `${r.record_code} ${r.formula_name}` : `${r.name}${r.version ? ` (versión ${r.version})` : ''}`);
 const getOne = (s, id) => tx(s, 'readonly', (t) => t.objectStore(s).get(id));
 const metaGet = (k) => tx('meta', 'readonly', (t) => t.objectStore('meta').get(k));
 const metaSet = (k, v) => tx('meta', 'readwrite', (t) => t.objectStore('meta').put(v, k));
@@ -785,15 +791,16 @@ async function viewTrash() {
     (await getAll(st)).filter((r) => r.deleted_at).forEach((r) => rows.push({ st, r }));
   }
   rows.sort((a, b) => String(b.r.deleted_at).localeCompare(String(a.r.deleted_at)));
-  const href = ({ st, r }) => (st === 'pnt' ? `#pnt--${r.uuid}` : `#formulas--${r.uuid}`);
-  return `<p class="hint intro">Las fórmulas y los PNT eliminados se guardan aquí. Al restaurarlos vuelven a su lista con sus documentos y vínculos.</p>
+  const href = ({ st, r }) => `#${DELETED_ROUTE[st]}--${r.uuid}`;
+  const purge = (x) => (x.st === 'production' ? `<button class="btn danger-outline small" data-act="purgeRecord" data-store="production" data-id="${esc(x.r.uuid)}">Borrar del todo</button>` : '');
+  return `<p class="hint intro">Las fórmulas, los PNT y las elaboraciones en proceso eliminados se guardan aquí. Al restaurarlos vuelven a su lista con sus documentos y vínculos. Una elaboración se puede borrar del todo, con su receta.</p>
     ${rows.length
-      ? `<ul class="list">${rows.map((x) => `<li><div class="row"><a class="row-main" href="${esc(href(x))}"><span class="kind">${esc(DELETABLE[x.st])}</span><strong>${esc(recordName(x.st, x.r))}</strong><span class="sub"><span>${x.st === 'formula' ? 'Eliminada' : 'Eliminado'} el ${esc(fmtStamp(x.r.deleted_at))}${x.r.deleted_by ? ` por ${esc(x.r.deleted_by)}` : ''}</span></span></a><button class="btn secondary small" data-act="restoreRecord" data-store="${x.st}" data-id="${esc(x.r.uuid)}">Restaurar</button></div></li>`).join('')}</ul>`
-      : empty('La papelera está vacía.', 'Aquí aparecerán las fórmulas y los PNT que elimines.')}`;
+      ? `<ul class="list">${rows.map((x) => `<li><div class="row"><a class="row-main" href="${esc(href(x))}"><span class="kind">${esc(DELETABLE[x.st])}</span><strong>${esc(recordName(x.st, x.r))}</strong><span class="sub"><span>Eliminad${delG(x.st)} el ${esc(fmtStamp(x.r.deleted_at))}${x.r.deleted_by ? ` por ${esc(x.r.deleted_by)}` : ''}</span></span></a><div class="row-actions"><button class="btn secondary small" data-act="restoreRecord" data-store="${x.st}" data-id="${esc(x.r.uuid)}">Restaurar</button>${purge(x)}</div></div></li>`).join('')}</ul>`
+      : empty('La papelera está vacía.', 'Aquí aparecerán las fórmulas, los PNT y las elaboraciones en proceso que elimines.')}`;
 }
 /** Aviso de elemento eliminado, con el botón para restaurarlo. */
 function deletedBanner(store, r) {
-  return `<div class="msg warn reminder"><p><strong>${esc(DELETABLE[store])} eliminad${store === 'formula' ? 'a' : 'o'}</strong> el ${esc(fmtStamp(r.deleted_at))}${r.deleted_by ? ` por ${esc(r.deleted_by)}` : ''}. Está en la papelera.</p><button class="btn small" data-act="restoreRecord" data-store="${store}" data-id="${esc(r.uuid)}">Restaurar</button></div>`;
+  return `<div class="msg warn reminder"><p><strong>${esc(DELETABLE[store])} eliminad${delG(store)}</strong> el ${esc(fmtStamp(r.deleted_at))}${r.deleted_by ? ` por ${esc(r.deleted_by)}` : ''}. Está en la papelera.</p><button class="btn small" data-act="restoreRecord" data-store="${store}" data-id="${esc(r.uuid)}">Restaurar</button></div>`;
 }
 
 /**
@@ -855,7 +862,7 @@ async function backupStatus() {
 
 /** Avisos que la app calcula al abrirse: stock, caducidades, cuarentenas, elaboraciones paradas y fichas incompletas. */
 async function computeAlerts() {
-  const [mats, packs, prods] = await Promise.all([getAll('material'), getAll('packaging'), getAll('production')]);
+  const [mats, packs, prods] = await Promise.all([getAll('material'), getAll('packaging'), getLive('production')]);
   const out = [];
   for (const g of stockGroups(mats, 'material')) {
     if (g.low) out.push({ tone: 'red', kind: 'Stock bajo', title: g.name, text: `${g.total > 0 ? `Quedan ${fmtNum(round6(g.total))} ${g.unit}` : 'Sin existencias en uso'} (mínimo ${fmtNum(g.min)} ${g.unit})${g.active ? '. Principio activo' : ''}`, href: `#materias--${g.sample}` });
@@ -1065,7 +1072,7 @@ async function viewSettings() {
       ${persisted === true ? '' : '<button class="btn secondary" data-act="persist">Proteger datos</button><p class="hint">Si Chrome no lo permite, instala primero la app en la pantalla de inicio y vuelve a intentarlo.</p>'}
       ${standalone ? '<p class="hint">App instalada en el teléfono.</p>' : state.deferredInstall ? '<button class="btn secondary" data-act="install">Instalar en el teléfono</button>' : '<p class="hint">Para instalarla: menú de Chrome (⋮) y «Instalar aplicación».</p>'}
     </div></section>
-  <section><h2>Actividad</h2><ul class="list"><li><a class="row" href="#auditoria"><span class="row-main">Ver el registro de actividad</span></a></li><li><a class="row" href="#papelera"><span class="row-main">Papelera: fórmulas y PNT eliminados</span></a></li><li><a class="row" href="#conservacion"><span class="row-main">Conservación: borrados programados</span></a></li></ul></section>
+  <section><h2>Actividad</h2><ul class="list"><li><a class="row" href="#auditoria"><span class="row-main">Ver el registro de actividad</span></a></li><li><a class="row" href="#papelera"><span class="row-main">Papelera: fórmulas, PNT y elaboraciones eliminados</span></a></li><li><a class="row" href="#conservacion"><span class="row-main">Conservación: borrados programados</span></a></li></ul></section>
   <section><h2>Acerca de</h2><div class="panel"><dl class="facts">
       <dt>Versión</dt><dd>FARMA·LAB móvil ${APP_VERSION}</dd>
       <dt>Usuario</dt><dd>${esc(state.profile.name)}</dd>
@@ -1419,7 +1426,7 @@ const ACTIONS = {
     if (check.block) { await ask({ title: `No se puede eliminar`, message: check.block, confirmLabel: 'Entendido', cancelLabel: 'Cerrar' }); return; }
     const name = recordName(store, rec);
     const ok = await ask({
-      title: `Eliminar ${DELETABLE[store] === 'PNT' ? 'PNT' : 'fórmula'}`,
+      title: `Eliminar ${DELETED_WHAT[store] === 'PNT' ? 'PNT' : `la ${DELETED_WHAT[store]}`}`,
       message: `${name} pasará a la papelera (Ajustes → Papelera), desde donde se puede restaurar.${check.message ? `\n\n${check.message}` : ''}`,
       confirmLabel: 'Eliminar', danger: true,
     });
@@ -1427,8 +1434,8 @@ const ACTIONS = {
     rec.deleted_at = nowIso();
     rec.deleted_by = state.profile.name;
     await save(store, rec, `eliminar_${store}`, name);
-    toast(`${DELETABLE[store]} eliminad${store === 'formula' ? 'a' : 'o'}. Puedes restaurarl${store === 'formula' ? 'a' : 'o'} desde la papelera.`);
-    location.hash = store === 'pnt' ? '#pnt' : '#formulas';
+    toast(`${DELETABLE[store]} eliminad${delG(store)}. Puedes restaurarl${delG(store)} desde la papelera.`);
+    location.hash = `#${DELETED_ROUTE[store]}`;
   },
   restoreRecord: async (el) => {
     const { store, id } = el.dataset;
@@ -1440,7 +1447,34 @@ const ACTIONS = {
     delete rec.deleted_at;
     delete rec.deleted_by;
     await save(store, rec, `restaurar_${store}`, recordName(store, rec));
-    toast(`${DELETABLE[store]} restaurad${store === 'formula' ? 'a' : 'o'}.`);
+    toast(`${DELETABLE[store]} restaurad${delG(store)}.`);
+    await route();
+  },
+  // Solo para elaboraciones en la papelera: borrado definitivo, con su receta y sus documentos (como el de conservación).
+  purgeRecord: async (el) => {
+    const { store, id } = el.dataset;
+    if (store !== 'production') return;
+    const rec = await getOne(store, id);
+    if (!rec || !rec.deleted_at) return;
+    const docs = await docsOf(rec.uuid);
+    const name = recordName(store, rec);
+    const ok = await ask({
+      title: 'Borrar del todo',
+      message: `${name} se borrará para siempre${docs.length ? `, con ${docs.some((d) => d.kind === 'receta') ? 'su receta' : ''}${docs.some((d) => d.kind === 'receta') && docs.some((d) => d.kind !== 'receta') ? ' y ' : ''}${docs.some((d) => d.kind !== 'receta') ? 'sus documentos' : ''}` : ''}. No se podrá restaurar. Quedará anotado en el registro de actividad.`,
+      confirmLabel: 'Borrar del todo', danger: true,
+    });
+    if (!ok) return;
+    const stamp = nowIso();
+    await tx([store, FILE_STORE, 'audit', 'meta'], 'readwrite', (t) => {
+      t.objectStore(store).delete(rec.uuid);
+      docs.forEach((d) => t.objectStore(FILE_STORE).delete(d.uuid));
+      // Para que no vuelva desde el otro equipo al sincronizar o al importar una copia.
+      addTombstones(t, [{ store, uuid: rec.uuid }, ...docs.filter((d) => !isLocalOnly(d)).map((d) => ({ store: FILE_STORE, uuid: d.uuid }))], stamp);
+      t.objectStore('audit').put(auditEntry('borrado_definitivo_elaboracion', `${name}${docs.length ? ` (${docs.length} ${docs.length === 1 ? 'documento' : 'documentos'})` : ''}`, stamp));
+      t.objectStore('meta').put(stamp, 'lastChange');
+    });
+    AFTER_SAVE.forEach((fn) => { try { fn(); } catch (err) { console.error(err); } });   // p. ej., enviarlo al otro equipo
+    toast('Elaboración borrada del todo.');
     await route();
   },
   downloadDoc: async (el) => {

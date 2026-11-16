@@ -188,7 +188,7 @@ async function viewMaterial(id) {
   const expired = lotExpired(m);
   const reason = archiveReason(m);
   if (reason) state.parent = '#materias--archivo';
-  const used = (await getAll('production')).filter((p) => (p.weighings || []).some((w) => w.material_uuid === m.uuid || (w.material_lot && lc(w.material_lot) === lc(m.lot) && fold(w.ingredient) === fold(m.name))));
+  const used = (await getLive('production')).filter((p) => (p.weighings || []).some((w) => w.material_uuid === m.uuid || (w.material_lot && lc(w.material_lot) === lc(m.lot) && fold(w.ingredient) === fold(m.name))));
   const q = encodeURIComponent(m.name);
   const retFact = await retentionFact('material', m);
   return `<div class="panel">
@@ -866,7 +866,7 @@ async function viewPackagings() {
 async function viewPackaging(id) {
   const p = await getOne('packaging', id);
   if (!p) return empty('Este material no existe.', '');
-  const used = (await getAll('production')).filter((x) => (x.packaging_used || []).some((u) => u.packaging_uuid === p.uuid));
+  const used = (await getLive('production')).filter((x) => (x.packaging_used || []).some((u) => u.packaging_uuid === p.uuid));
   const retFact = await retentionFact('packaging', p);
   const reason = archiveReason(p);
   if (reason) state.parent = '#envases--archivo';

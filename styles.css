@@ -267,6 +267,9 @@ input[type="text"].display-input:focus { outline: none; border: 0; }
 .dialog-body p { color: var(--ink); }
 .dialog-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 6px; }
 .dialog-actions .btn { flex: 1; }
+.row-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }   /* papelera: Restaurar y Borrar del todo */
+.row:has(> .row-actions) { flex-wrap: wrap; row-gap: 10px; }
+.row:has(> .row-actions) > .row-main { flex: 1 1 240px; }   /* si no caben al lado, los botones bajan */
 /* Ventana de avisos */
 .alert-pop { width: min(460px, calc(100% - 24px)); }
 .alert-pop .alerts { margin: 0 -8px; max-height: min(52vh, 420px); overflow-y: auto; }

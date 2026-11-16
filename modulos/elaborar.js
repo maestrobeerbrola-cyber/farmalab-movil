@@ -44,14 +44,16 @@ const staleDays = (p) => (p.status === 'en_proceso' ? Math.floor((Date.now() - D
 // ------------------------------------------------------------------ lista y alta
 const STATUS_ORDER = { en_proceso: 0, elaborada: 1, dispensada: 2, rechazada: 3 };
 async function viewProductions() {
-  const items = (await getAll('production')).sort((a, b) => (STATUS_ORDER[a.status] - STATUS_ORDER[b.status]) || String(b.created_at).localeCompare(String(a.created_at)));
+  const all = await getAll('production');
+  const items = all.filter((p) => !p.deleted_at).sort((a, b) => (STATUS_ORDER[a.status] - STATUS_ORDER[b.status]) || String(b.created_at).localeCompare(String(a.created_at)));
+  const trashed = all.length - items.length;
   const list = items.length
     ? `<ul class="list" data-list>${items.map((p) => {
       const warn = (['elaborada', 'dispensada'].includes(p.status) && pendingItems(p).length) || staleDays(p) >= STALE_PRODUCTION_DAYS;
       return `<li data-text="${esc(lc([p.lot, p.record_code, p.formula_name, p.recetario_no, STATUS.production[p.status]].join(' ')))}"><a class="row" href="#elaboraciones--${esc(p.uuid)}"><div class="row-main"><strong>${esc(p.lot || p.record_code)}</strong><span class="sub"><span>${esc(p.formula_name)}</span><span>${fmtNum(p.target_amount)} ${esc(p.unit)}</span><span>${esc(fmtStamp(p.created_at).slice(0, 10))}</span>${warn ? '<span class="warn">Pendiente</span>' : ''}</span></div>${pill('production', p.status)}</a></li>`;
     }).join('')}</ul><p class="none" data-none hidden>Ninguna elaboración coincide con la búsqueda.</p>`
     : empty('Aún no hay elaboraciones.', 'Crea una con «Nueva elaboración» a partir de una fórmula aprobada.');
-  return `${items.length ? searchBox('Buscar lote, fórmula o nº de recetario') : ''}${list}${fab('#elaboraciones--nueva', 'Nueva elaboración')}`;
+  return `${items.length ? searchBox('Buscar lote, fórmula o nº de recetario') : ''}${list}${trashed ? `<p class="more"><a href="#papelera">Eliminadas (${trashed})</a></p>` : ''}${fab('#elaboraciones--nueva', 'Nueva elaboración')}`;
 }
 
 async function suggestRecordCode() {
@@ -167,6 +169,17 @@ function qcRow(t = {}) {
 async function viewProduction(id) {
   const p = await getOne('production', id);
   if (!p) return empty('Este registro no existe.', '');
+  if (p.deleted_at) {
+    return `${deletedBanner('production', p)}<div class="panel">
+      <div class="head-row"><h2 class="big">${esc(p.record_code)}</h2>${pill('production', p.status)}</div>
+      ${facts([
+        ['Fórmula', `${esc(p.formula_name)} (versión ${esc(p.formula_version)})`],
+        ['Cantidad', `${fmtNum(p.target_amount)} ${esc(p.unit)}`],
+        ['Elaborador', val(p.operator)],
+        ['Inicio', esc(fmtStamp(p.created_at))],
+      ])}</div>
+      <p class="hint">Restáurala para seguir con ella, o bórrala del todo desde la <a href="#papelera">papelera</a>.</p>`;
+  }
   const s = await loadSettings();
   state.materials = await getAll('material');
   state.packs = (await getAll('packaging')).sort(byText('name'));
@@ -295,7 +308,10 @@ async function viewProduction(id) {
     pickLabel: 'Elegir archivo', accept: RECETA_ACCEPT, camera: true, none: 'Sin receta adjunta.', submit: 'Guardar receta',
     note: 'Solo se guarda en este dispositivo: no va en las copias de seguridad ni se sincroniza porque contiene datos del paciente.',
   });
-  return header + receta + guide;
+  const remove = open ? `<section><h2>Eliminar</h2>
+    <button class="btn danger-outline block" data-act="deleteRecord" data-store="production" data-id="${esc(p.uuid)}">Eliminar la elaboración</button>
+    <p class="hint">Si finalmente no se va a elaborar. Todavía no tiene lote ni se ha descontado stock. Pasa a la papelera, desde donde se puede restaurar o borrar del todo.</p></section>` : '';
+  return header + receta + guide + remove;
 }
 
 function updateDeviation(input) {
@@ -474,6 +490,7 @@ Object.assign(FORMS, {
   async guide(form, submitter) {
     const rec = await getOne('production', form.dataset.id);
     if (!rec) throw new InputError('Este registro ya no existe.');
+    if (rec.deleted_at) throw new InputError('Esta elaboración está en la papelera. Restáurala para seguir con ella.');
     if (rec.status === 'rechazada') throw new InputError('Esta elaboración está rechazada y no se puede modificar.');
     const wasStatus = rec.status;
     const packsBefore = (rec.packaging_used || []).map((u) => ({ ...u }));
@@ -859,4 +876,13 @@ NEEDED.guide = {
     if (status === 'dispensada') out.push('recetario_no', 'dispensed_date', 'dispensed_qty');
     return out;
   },
+};
+
+// Eliminar una elaboración en proceso (si finalmente no se elabora): pasa a la papelera. Las ya elaboradas se rechazan.
+DELETE_CHECKS.production = async (p) => {
+  if (p.status !== 'en_proceso') {
+    return { block: 'Solo se puede eliminar una elaboración en proceso. Si ya está elaborada, recházala para que quede en el registro.' };
+  }
+  const receta = (await docsOf(p.uuid)).some((d) => d.kind === 'receta');
+  return { message: `Todavía no tiene lote ni se ha descontado stock.${receta ? ' La receta adjunta se queda con ella en la papelera, solo en este dispositivo; si la borras del todo, se borra también.' : ''}` };
 };

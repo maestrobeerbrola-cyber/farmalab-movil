@@ -691,7 +691,7 @@ function packObservation(p, used = []) {
 /** Elaboraciones que han usado un material, por fecha. */
 async function packUsage() {
   const out = new Map();
-  (await getAll('production'))
+  (await getLive('production'))
     .sort((a, b) => String(a.elaborated_date || a.created_at).localeCompare(String(b.elaborated_date || b.created_at)))
     .forEach((x) => (x.packaging_used || []).forEach((u) => {
       if (!u.packaging_uuid) return;

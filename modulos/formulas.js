@@ -56,10 +56,10 @@ async function viewFormula(id) {
 }
 
 DELETE_CHECKS.formula = async (f) => {
-  const used = (await getAll('production')).filter((p) => p.formula_uuid === f.uuid);
+  const used = (await getLive('production')).filter((p) => p.formula_uuid === f.uuid);
   const open = used.filter((p) => p.status === 'en_proceso');
   if (open.length) {
-    return { block: `Hay ${open.length === 1 ? 'una elaboración en proceso' : `${open.length} elaboraciones en proceso`} con esta fórmula (${open.map((p) => p.record_code).join(', ')}). Termínala${open.length === 1 ? '' : 's'} o recházala${open.length === 1 ? '' : 's'} antes de eliminarla.` };
+    return { block: `Hay ${open.length === 1 ? 'una elaboración en proceso' : `${open.length} elaboraciones en proceso`} con esta fórmula (${open.map((p) => p.record_code).join(', ')}). Termínala${open.length === 1 ? '' : 's'} o elimínala${open.length === 1 ? '' : 's'} antes de eliminar la fórmula.` };
   }
   return {
     message: used.length
