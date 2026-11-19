@@ -66,6 +66,23 @@ async function suggestRecordCode() {
   return `${prefix}${pad2(n)}`;
 }
 const presentationAmount = (text) => { const m = String(text || '').match(/(\d+(?:[.,]\d+)?)/); return m ? Number(m[1].replace(',', '.')) : null; };
+const presentationUnit = (text) => (/\d\s*(ml|mililitros?)\b/i.test(String(text || '')) ? 'ml' : /\d\s*(g|gr|gramos?)\b/i.test(String(text || '')) ? 'g' : null);
+/*
+ * Peso o volumen: una fórmula escrita en g se puede elaborar en ml (y al revés) con la densidad del preparado.
+ * La cantidad se pasa a la unidad de la fórmula (60 ml × 1,02 g/ml = 61,2 g) y desde ahí se escala la composición.
+ */
+const MASS_VOL = { g: 'masa', ml: 'volumen' };
+const UNIT_WORDS = { g: 'g (peso)', ml: 'ml (volumen)', unidades: 'unidades' };
+const unitChoices = (formulaUnit) => (MASS_VOL[formulaUnit] ? ['g', 'ml'] : [formulaUnit || 'g']);
+const crossUnit = (unit, formulaUnit) => Boolean(MASS_VOL[unit] && MASS_VOL[formulaUnit] && MASS_VOL[unit] !== MASS_VOL[formulaUnit]);
+const inFormulaUnit = (amount, unit, formulaUnit, density) => (!crossUnit(unit, formulaUnit) ? amount : unit === 'ml' ? amount * density : amount / density);
+/** «60 ml (61,2 g con densidad 1,02 g/ml)»: cantidad de una elaboración, con su equivalencia si se pasó de volumen a peso o al revés. */
+const prodQty = (p, html = true) => {
+  const base = `${fmtNum(p.target_amount)} ${p.unit}`;
+  if (!isNum(p.density) || !isNum(p.formula_amount)) return html ? esc(base) : base;
+  const eq = `${fmtNum(round2(p.formula_amount))} ${p.formula_unit} con densidad ${fmtNum(p.density)} g/ml`;
+  return html ? `${esc(base)} <span class="hint">(${esc(eq)})</span>` : `${base} (${eq})`;
+};
 
 async function viewProductionNew(preselect) {
   const formulas = (await getLive('formula')).filter((f) => f.status === 'aprobada').sort(byText('name'));
@@ -80,12 +97,15 @@ async function viewProductionNew(preselect) {
     <div data-cn-box></div>
     <div class="grid2">
       ${field('Cantidad a elaborar', decimal('target_amount', 'required'))}
-      ${field('Unidad', '<input type="text" name="unit_view" readonly tabindex="-1">')}
+      ${field('Unidad', '<select name="unit"></select>')}
+    </div>
+    <div data-density hidden>
+      ${field('Densidad del preparado (g/ml)', decimal('density', 'data-density-input'), '<span data-density-hint></span>')}
     </div>
     ${field('Código de registro', text('record_code', `value="${esc(code)}" required maxlength="80"`), 'Identifica la elaboración hasta que se le asigne el lote. No puede repetirse.')}
     ${field('Observaciones', '<textarea name="notes" maxlength="2000"></textarea>')}
     <section><h2>Cantidades teóricas</h2><div id="preview"></div>
-    <p class="hint">Escalado proporcional de la composición aprobada. No contempla densidad, mermas, sobrellenado ni conversiones de unidades: usa la calculadora si lo necesitas.</p></section>
+    <p class="hint">Escalado proporcional de la composición aprobada. Puedes elaborar en peso o en volumen: si no es la unidad de la fórmula, se pasa con la densidad. No contempla mermas ni sobrellenado: usa la calculadora si lo necesitas.</p></section>
     <button class="btn block" type="submit">Empezar elaboración</button>
   </form>`;
 }
@@ -93,12 +113,23 @@ function updatePreview(form) {
   const f = state.formulaCache[form.formula_uuid.value];
   const box = $('#preview');
   if (!f || !box) return;
-  form.unit_view.value = f.unit;
+  const sel = form.elements.unit;
+  if (sel.dataset.formula !== f.uuid) {
+    sel.dataset.formula = f.uuid;
+    sel.innerHTML = options(unitChoices(f.unit), f.unit, UNIT_WORDS);
+    form.elements.density.value = isNum(f.density) ? inputNum(f.density) : '';
+  }
+  const unit = sel.value;
+  const cross = crossUnit(unit, f.unit);
+  $('[data-density]', form).hidden = !cross;
+  if (cross) {
+    $('[data-density-hint]', form).textContent = `La fórmula está escrita para ${fmtNum(f.target_amount)} ${f.unit}: para elaborarla en ${unit === 'ml' ? 'volumen' : 'peso'} hace falta la densidad${isNum(f.density) ? ' (se propone la de la fórmula)' : '. Si la guardas en la fórmula, se propondrá sola'}.`;
+  }
   const cnBox = $('[data-cn-box]', form);
   if (cnBox && cnBox.dataset.formula !== f.uuid) {
     cnBox.dataset.formula = f.uuid;
     const cns = f.national_codes || [];
-    cnBox.innerHTML = cns.length ? field('Presentación y código nacional', `<select name="cn"><option value="">Sin código nacional</option>${cns.map((c, i) => `<option value="${i}">${esc([c.presentation, c.concentration].filter(Boolean).join(' · '))} · CN ${esc(c.cn)}</option>`).join('')}</select>`, 'Al elegirla se propone su cantidad.') : '';
+    cnBox.innerHTML = cns.length ? field('Presentación y código nacional', `<select name="cn"><option value="">Sin código nacional</option>${cns.map((c, i) => `<option value="${i}">${esc([c.presentation, c.concentration].filter(Boolean).join(' · '))} · CN ${esc(c.cn)}</option>`).join('')}</select>`, 'Al elegirla se proponen su cantidad y su unidad.') : '';
   }
   let target = null;
   try { target = parseNum(form.target_amount.value, 'Cantidad'); } catch { target = null; }
@@ -106,8 +137,17 @@ function updatePreview(form) {
     box.innerHTML = `<p class="hint">Escribe la cantidad para ver la de cada componente (la fórmula está definida para ${fmtNum(f.target_amount)} ${esc(f.unit)}).</p>`;
     return;
   }
-  const factor = target / f.target_amount;
-  box.innerHTML = `<ul class="list">${(f.components || []).map((c) => `<li><div class="row"><span class="row-main">${esc(c.ingredient)} ${compTags(c)}</span><b class="num">${fmtNum(round6(c.amount * factor))} ${esc(c.unit)}</b></div></li>`).join('')}</ul>`;
+  let base = target;
+  let eq = '';
+  if (cross) {
+    let density = null;
+    try { density = parseNum(form.elements.density.value, 'Densidad'); } catch { density = null; }
+    if (!density || density <= 0) { box.innerHTML = '<p class="hint">Indica la densidad del preparado para calcular la cantidad de cada componente.</p>'; return; }
+    base = round6(inFormulaUnit(target, unit, f.unit, density));
+    eq = `<p class="msg plain">${fmtNum(target)} ${esc(unit)} ${unit === 'ml' ? '×' : '÷'} ${fmtNum(density)} g/ml = <strong>${fmtNum(round2(base))} ${esc(f.unit)}</strong> de la fórmula (escrita para ${fmtNum(f.target_amount)} ${esc(f.unit)}).</p>`;
+  }
+  const factor = base / f.target_amount;
+  box.innerHTML = `${eq}<ul class="list">${(f.components || []).map((c) => `<li><div class="row"><span class="row-main">${esc(c.ingredient)} ${compTags(c)}</span><b class="num">${fmtNum(round6(c.amount * factor))} ${esc(c.unit)}</b></div></li>`).join('')}</ul>`;
 }
 INPUT_HOOKS.push((t) => { const f = t.closest('form[data-form="productionNew"]'); if (f) updatePreview(f); });
 CHANGE_HOOKS.push((t) => {
@@ -118,6 +158,8 @@ CHANGE_HOOKS.push((t) => {
     const c = formula && (formula.national_codes || [])[Number(t.value)];
     const amount = c && presentationAmount(c.presentation);
     if (amount) f.target_amount.value = fmtNum(amount);
+    const unit = c && presentationUnit(c.presentation);   // «Frasco 60 ml» → ml
+    if (unit && [...f.elements.unit.options].some((o) => o.value === unit)) f.elements.unit.value = unit;
   }
   updatePreview(f);
 });
@@ -174,7 +216,7 @@ async function viewProduction(id) {
       <div class="head-row"><h2 class="big">${esc(p.record_code)}</h2>${pill('production', p.status)}</div>
       ${facts([
         ['Fórmula', `${esc(p.formula_name)} (versión ${esc(p.formula_version)})`],
-        ['Cantidad', `${fmtNum(p.target_amount)} ${esc(p.unit)}`],
+        ['Cantidad', prodQty(p)],
         ['Elaborador', val(p.operator)],
         ['Inicio', esc(fmtStamp(p.created_at))],
       ])}</div>
@@ -203,7 +245,7 @@ async function viewProduction(id) {
       p.lot ? ['Registro', esc(p.record_code)] : ['Lote', '<span class="hint">Se asigna al marcarla como elaborada</span>'],
       ['Tipo', esc(FORMULA_TYPES[p.formula_type] || FORMULA_TYPES.fm)],
       ['Forma y vía', `${val(p.form)}${p.route ? ` · ${esc(p.route)}` : ''}`],
-      ['Cantidad', `${fmtNum(p.target_amount)} ${esc(p.unit)}`],
+      ['Cantidad', prodQty(p)],
       p.cn ? ['Código nacional', `${esc(p.cn.cn)} (${esc([p.cn.presentation, p.cn.concentration].filter(Boolean).join(', '))})`] : null,
       tasado ? ['PVP tasado', `<strong>${money(tasado.pvp)}</strong>`] : null,
       !tasado && p.valuation ? ['Precio de valoración', `<strong>${money(p.valuation.total)}</strong> <span class="hint">(${fmtDay(p.valuation.date)})</span>`] : null,
@@ -468,7 +510,15 @@ Object.assign(FORMS, {
     if (!(f.target_amount > 0)) throw new InputError('La fórmula no tiene un lote de referencia válido.');
     if ((await getAll('production')).some((p) => lc(p.record_code) === lc(code))) throw new InputError('Ya existe un registro de elaboración con ese código.');
     const pnts = (await getLive('pnt')).filter((p) => (f.pnt_uuids || []).includes(p.uuid));
-    const factor = target / f.target_amount;
+    const unit = unitChoices(f.unit).includes(d.unit) ? d.unit : f.unit;
+    let density = null;
+    if (crossUnit(unit, f.unit)) {
+      density = parseNum(d.density, 'Densidad');
+      if (!density) throw new InputError(`Indica la densidad del preparado (g/ml) para elaborar en ${unit === 'ml' ? 'volumen' : 'peso'} una fórmula escrita en ${f.unit}.`);
+      if (density < 0.1 || density > 5) throw new InputError('La densidad debe estar entre 0,1 y 5 g/ml.');
+    }
+    const base = density ? round6(inFormulaUnit(target, unit, f.unit, density)) : target;
+    const factor = base / f.target_amount;
     const cn = d.cn !== undefined && d.cn !== '' ? (f.national_codes || [])[Number(d.cn)] || null : null;
     const now = nowIso();
     const rec = {
@@ -476,7 +526,7 @@ Object.assign(FORMS, {
       formula_uuid: f.uuid, formula_code: f.code, formula_name: f.name, formula_version: f.version, formula_type: f.type || 'fm',
       form: f.form || '', route: f.route || '', storage: f.storage || '', validity_days: isNum(f.validity_days) ? f.validity_days : null,
       pnt_refs: pnts.map((p) => ({ uuid: p.uuid, code: p.code, title: p.title, version: p.version })), cn,
-      target_amount: target, unit: f.unit, operator: state.profile.name, notes: str(d.notes),
+      target_amount: target, unit, density, formula_amount: density ? base : null, formula_unit: f.unit, operator: state.profile.name, notes: str(d.notes),
       weighings: (f.components || []).map((c) => ({
         uuid: newId(), ingredient: c.ingredient, role: c.role || 'excipiente', edo: isEdo(c), theoretical: round6(c.amount * factor), actual: null, unit: c.unit, material_lot: '',
       })),

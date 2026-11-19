@@ -1,4 +1,4 @@
-# FARMA·LAB móvil v0.3.29 (prototipo)
+# FARMA·LAB móvil v0.3.30 (prototipo)
 
 App que se instala desde Chrome o Edge (Android y Windows) y funciona sin conexión. Los datos se guardan **en el propio dispositivo** y, si se configura, se sincronizan entre el móvil y el PC a través de Google Drive.
 
@@ -14,6 +14,11 @@ App que se instala desde Chrome o Edge (Android y Windows) y funciona sin conexi
 - **Temperaturas** (PN/L/PG/009/00): lectura diaria del local y la nevera, incidencias y registro mensual en PDF.
 - **Documentos**: PNT y bibliografía con su PDF, Word o foto, que se consultan dentro de la app, también sin conexión.
 - Registro de actividad, bloqueo con PIN, exportar e importar copias.
+
+## Novedades de la v0.3.30
+- **Elaborar en peso o en volumen.** Al empezar una elaboración, la unidad se elige: g (peso) o ml (volumen). Si no es la unidad en que está escrita la fórmula, se pide la **densidad del preparado** (g/ml) y la cantidad se pasa a la de la fórmula antes de escalar la composición (60 ml × 0,9 g/ml = 54 g). La equivalencia sale en la ficha de la elaboración y en la composición de la ficha 2.
+- Al elegir una presentación con código nacional («Frasco 60 ml») se proponen su cantidad y su unidad.
+- Cada fórmula puede guardar su densidad (opcional, en «Editar fórmula»): se propone sola al elaborarla en la otra unidad. Las fórmulas en unidades (cápsulas) siguen en unidades.
 
 ## Novedades de la v0.3.29
 - **Índice de materias primas** (Almacén → Índice): cada materia prima tiene su nº (Finastopic, 109) y cada envase que se recibe toma como nº de registro interno el siguiente: 109.1, 109.2, 109.3… Se asigna solo **al registrar la recepción** (PN/L/PG/005/00, 4.1.2), y la ficha del índice muestra sus envases y el próximo nº.

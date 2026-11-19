@@ -54,7 +54,7 @@ async function recordSheetData(p, extra) {
   return {
     name: [p.formula_name, p.formula_code && `(${p.formula_code}, versión ${p.formula_version || '1'})`].filter(Boolean).join(' '),
     type: FORMULA_TYPES[p.formula_type] || FORMULA_TYPES.fm,
-    composition: `${ws.map((w) => `${w.ingredient} ${fmtNum(w.theoretical)} ${w.unit}`).join(' · ')} — para ${fmtNum(p.target_amount)} ${p.unit}`,
+    composition: `${ws.map((w) => `${w.ingredient} ${fmtNum(w.theoretical)} ${w.unit}`).join(' · ')} — para ${prodQty(p, false)}`,
     pnts: (p.pnt_refs || []).map((r) => `${r.code} · ${r.title} · versión ${r.version || '1'}`),
     method: str(p.method_notes),
     equipment: await balanceEquipmentText(p.equipment || [], p.elaborated_date),
