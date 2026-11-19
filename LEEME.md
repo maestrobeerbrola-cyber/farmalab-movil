@@ -1,4 +1,4 @@
-# FARMA·LAB móvil v0.3.30 (prototipo)
+# FARMA·LAB móvil v0.3.31 (prototipo)
 
 App que se instala desde Chrome o Edge (Android y Windows) y funciona sin conexión. Los datos se guardan **en el propio dispositivo** y, si se configura, se sincronizan entre el móvil y el PC a través de Google Drive.
 
@@ -14,6 +14,11 @@ App que se instala desde Chrome o Edge (Android y Windows) y funciona sin conexi
 - **Temperaturas** (PN/L/PG/009/00): lectura diaria del local y la nevera, incidencias y registro mensual en PDF.
 - **Documentos**: PNT y bibliografía con su PDF, Word o foto, que se consultan dentro de la app, también sin conexión.
 - Registro de actividad, bloqueo con PIN, exportar e importar copias.
+
+## Novedades de la v0.3.31
+- **Sin densidad.** Al elaborar se indica el **peso total (g) o el volumen total (ml)** y cada componente se calcula con su porcentaje en la fórmula: 5 % de 60 ml = 3 g. Se quita la densidad que pedía la v0.3.30 (también de la fórmula).
+- La vista previa de la elaboración y la composición de la fórmula muestran el porcentaje de cada componente (% p/p, p/v, v/v), según el total sea en g o en ml.
+- En la fórmula, «Lote de referencia» explica que, si la composición se escribe en porcentajes, se pone 100.
 
 ## Novedades de la v0.3.30
 - **Elaborar en peso o en volumen.** Al empezar una elaboración, la unidad se elige: g (peso) o ml (volumen). Si no es la unidad en que está escrita la fórmula, se pide la **densidad del preparado** (g/ml) y la cantidad se pasa a la de la fórmula antes de escalar la composición (60 ml × 0,9 g/ml = 54 g). La equivalencia sale en la ficha de la elaboración y en la composición de la ficha 2.

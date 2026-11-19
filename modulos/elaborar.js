@@ -68,15 +68,19 @@ async function suggestRecordCode() {
 const presentationAmount = (text) => { const m = String(text || '').match(/(\d+(?:[.,]\d+)?)/); return m ? Number(m[1].replace(',', '.')) : null; };
 const presentationUnit = (text) => (/\d\s*(ml|mililitros?)\b/i.test(String(text || '')) ? 'ml' : /\d\s*(g|gr|gramos?)\b/i.test(String(text || '')) ? 'g' : null);
 /*
- * Peso o volumen: una fórmula escrita en g se puede elaborar en ml (y al revés) con la densidad del preparado.
- * La cantidad se pasa a la unidad de la fórmula (60 ml × 1,02 g/ml = 61,2 g) y desde ahí se escala la composición.
+ * Peso o volumen total: la composición de la fórmula se lee como porcentajes (5 g en 100 = 5 %) y se aplica al total
+ * que se elija, en g o en ml (5 % p/v de 60 ml = 3 g). Cada componente conserva la unidad con la que está escrito.
  */
-const MASS_VOL = { g: 'masa', ml: 'volumen' };
 const UNIT_WORDS = { g: 'g (peso)', ml: 'ml (volumen)', unidades: 'unidades' };
-const unitChoices = (formulaUnit) => (MASS_VOL[formulaUnit] ? ['g', 'ml'] : [formulaUnit || 'g']);
-const crossUnit = (unit, formulaUnit) => Boolean(MASS_VOL[unit] && MASS_VOL[formulaUnit] && MASS_VOL[unit] !== MASS_VOL[formulaUnit]);
-const inFormulaUnit = (amount, unit, formulaUnit, density) => (!crossUnit(unit, formulaUnit) ? amount : unit === 'ml' ? amount * density : amount / density);
-/** «60 ml (61,2 g con densidad 1,02 g/ml)»: cantidad de una elaboración, con su equivalencia si se pasó de volumen a peso o al revés. */
+const unitChoices = (formulaUnit) => (['g', 'ml'].includes(formulaUnit) ? ['g', 'ml'] : [formulaUnit || 'g']);
+const PCT_FACTOR = { g: 1, mg: 0.001, ml: 1 };
+/** Porcentaje de un componente en la fórmula («5 % p/v»), según la unidad del total que se elabora. */
+function compPct(c, f, totalUnit) {
+  if (!(PCT_FACTOR[c.unit] > 0) || !['g', 'ml'].includes(f.unit) || !['g', 'ml'].includes(totalUnit) || !(f.target_amount > 0) || !isNum(c.amount)) return '';
+  const pct = Math.round(((c.amount * PCT_FACTOR[c.unit]) / f.target_amount) * 100 * 1000) / 1000;
+  return `${fmtNum(pct)} % ${c.unit === 'ml' ? 'v' : 'p'}/${totalUnit === 'ml' ? 'v' : 'p'}`;
+}
+/** «60 ml»: cantidad de una elaboración (las de la v0.3.30 con densidad muestran también su equivalencia). */
 const prodQty = (p, html = true) => {
   const base = `${fmtNum(p.target_amount)} ${p.unit}`;
   if (!isNum(p.density) || !isNum(p.formula_amount)) return html ? esc(base) : base;
@@ -96,16 +100,14 @@ async function viewProductionNew(preselect) {
     ${field('Fórmula aprobada', `<select name="formula_uuid" required>${formulas.map((f) => `<option value="${esc(f.uuid)}"${f.uuid === preselect ? ' selected' : ''}>${esc(f.code ? `${f.code} ` : '')}${esc(f.name)} (v${esc(f.version)})</option>`).join('')}</select>`)}
     <div data-cn-box></div>
     <div class="grid2">
-      ${field('Cantidad a elaborar', decimal('target_amount', 'required'))}
+      ${field('Cantidad total a elaborar', decimal('target_amount', 'required'))}
       ${field('Unidad', '<select name="unit"></select>')}
     </div>
-    <div data-density hidden>
-      ${field('Densidad del preparado (g/ml)', decimal('density', 'data-density-input'), '<span data-density-hint></span>')}
-    </div>
+    <p class="hint" data-unit-hint></p>
     ${field('Código de registro', text('record_code', `value="${esc(code)}" required maxlength="80"`), 'Identifica la elaboración hasta que se le asigne el lote. No puede repetirse.')}
     ${field('Observaciones', '<textarea name="notes" maxlength="2000"></textarea>')}
     <section><h2>Cantidades teóricas</h2><div id="preview"></div>
-    <p class="hint">Escalado proporcional de la composición aprobada. Puedes elaborar en peso o en volumen: si no es la unidad de la fórmula, se pasa con la densidad. No contempla mermas ni sobrellenado: usa la calculadora si lo necesitas.</p></section>
+    <p class="hint">Cada componente mantiene su porcentaje en la fórmula aprobada, aplicado al peso o volumen total. No contempla mermas ni sobrellenado: usa la calculadora si lo necesitas.</p></section>
     <button class="btn block" type="submit">Empezar elaboración</button>
   </form>`;
 }
@@ -117,14 +119,9 @@ function updatePreview(form) {
   if (sel.dataset.formula !== f.uuid) {
     sel.dataset.formula = f.uuid;
     sel.innerHTML = options(unitChoices(f.unit), f.unit, UNIT_WORDS);
-    form.elements.density.value = isNum(f.density) ? inputNum(f.density) : '';
   }
   const unit = sel.value;
-  const cross = crossUnit(unit, f.unit);
-  $('[data-density]', form).hidden = !cross;
-  if (cross) {
-    $('[data-density-hint]', form).textContent = `La fórmula está escrita para ${fmtNum(f.target_amount)} ${f.unit}: para elaborarla en ${unit === 'ml' ? 'volumen' : 'peso'} hace falta la densidad${isNum(f.density) ? ' (se propone la de la fórmula)' : '. Si la guardas en la fórmula, se propondrá sola'}.`;
-  }
+  $('[data-unit-hint]', form).textContent = unitChoices(f.unit).length > 1 ? 'Peso total (g) o volumen total (ml) de la fórmula terminada.' : '';
   const cnBox = $('[data-cn-box]', form);
   if (cnBox && cnBox.dataset.formula !== f.uuid) {
     cnBox.dataset.formula = f.uuid;
@@ -134,20 +131,14 @@ function updatePreview(form) {
   let target = null;
   try { target = parseNum(form.target_amount.value, 'Cantidad'); } catch { target = null; }
   if (!target || target <= 0 || !(f.target_amount > 0)) {
-    box.innerHTML = `<p class="hint">Escribe la cantidad para ver la de cada componente (la fórmula está definida para ${fmtNum(f.target_amount)} ${esc(f.unit)}).</p>`;
+    box.innerHTML = '<p class="hint">Escribe la cantidad total para ver la de cada componente.</p>';
     return;
   }
-  let base = target;
-  let eq = '';
-  if (cross) {
-    let density = null;
-    try { density = parseNum(form.elements.density.value, 'Densidad'); } catch { density = null; }
-    if (!density || density <= 0) { box.innerHTML = '<p class="hint">Indica la densidad del preparado para calcular la cantidad de cada componente.</p>'; return; }
-    base = round6(inFormulaUnit(target, unit, f.unit, density));
-    eq = `<p class="msg plain">${fmtNum(target)} ${esc(unit)} ${unit === 'ml' ? '×' : '÷'} ${fmtNum(density)} g/ml = <strong>${fmtNum(round2(base))} ${esc(f.unit)}</strong> de la fórmula (escrita para ${fmtNum(f.target_amount)} ${esc(f.unit)}).</p>`;
-  }
-  const factor = base / f.target_amount;
-  box.innerHTML = `${eq}<ul class="list">${(f.components || []).map((c) => `<li><div class="row"><span class="row-main">${esc(c.ingredient)} ${compTags(c)}</span><b class="num">${fmtNum(round6(c.amount * factor))} ${esc(c.unit)}</b></div></li>`).join('')}</ul>`;
+  const factor = target / f.target_amount;
+  box.innerHTML = `<ul class="list">${(f.components || []).map((c) => {
+    const pct = compPct(c, f, unit);
+    return `<li><div class="row"><span class="row-main">${esc(c.ingredient)} ${compTags(c)}${pct ? `<span class="sub"><span>${esc(pct)}</span></span>` : ''}</span><b class="num">${fmtNum(round6(c.amount * factor))} ${esc(c.unit)}</b></div></li>`;
+  }).join('')}</ul>`;
 }
 INPUT_HOOKS.push((t) => { const f = t.closest('form[data-form="productionNew"]'); if (f) updatePreview(f); });
 CHANGE_HOOKS.push((t) => {
@@ -511,14 +502,7 @@ Object.assign(FORMS, {
     if ((await getAll('production')).some((p) => lc(p.record_code) === lc(code))) throw new InputError('Ya existe un registro de elaboración con ese código.');
     const pnts = (await getLive('pnt')).filter((p) => (f.pnt_uuids || []).includes(p.uuid));
     const unit = unitChoices(f.unit).includes(d.unit) ? d.unit : f.unit;
-    let density = null;
-    if (crossUnit(unit, f.unit)) {
-      density = parseNum(d.density, 'Densidad');
-      if (!density) throw new InputError(`Indica la densidad del preparado (g/ml) para elaborar en ${unit === 'ml' ? 'volumen' : 'peso'} una fórmula escrita en ${f.unit}.`);
-      if (density < 0.1 || density > 5) throw new InputError('La densidad debe estar entre 0,1 y 5 g/ml.');
-    }
-    const base = density ? round6(inFormulaUnit(target, unit, f.unit, density)) : target;
-    const factor = base / f.target_amount;
+    const factor = target / f.target_amount;   // cada componente conserva su porcentaje sobre el total, en g o en ml
     const cn = d.cn !== undefined && d.cn !== '' ? (f.national_codes || [])[Number(d.cn)] || null : null;
     const now = nowIso();
     const rec = {
@@ -526,7 +510,7 @@ Object.assign(FORMS, {
       formula_uuid: f.uuid, formula_code: f.code, formula_name: f.name, formula_version: f.version, formula_type: f.type || 'fm',
       form: f.form || '', route: f.route || '', storage: f.storage || '', validity_days: isNum(f.validity_days) ? f.validity_days : null,
       pnt_refs: pnts.map((p) => ({ uuid: p.uuid, code: p.code, title: p.title, version: p.version })), cn,
-      target_amount: target, unit, density, formula_amount: density ? base : null, formula_unit: f.unit, operator: state.profile.name, notes: str(d.notes),
+      target_amount: target, unit, operator: state.profile.name, notes: str(d.notes),
       weighings: (f.components || []).map((c) => ({
         uuid: newId(), ingredient: c.ingredient, role: c.role || 'excipiente', edo: isEdo(c), theoretical: round6(c.amount * factor), actual: null, unit: c.unit, material_lot: '',
       })),

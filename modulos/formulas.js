@@ -37,12 +37,11 @@ async function viewFormula(id) {
       ['Plazo de validez', isNum(f.validity_days) ? `${f.validity_days} días` : '—'],
       ['Conservación de las elaboraciones', esc(RETENTION_CLASSES[f.retention_class] || RETENTION_CLASSES.general)],
       ['Lote de referencia', `${fmtNum(f.target_amount)} ${esc(f.unit)}`],
-      isNum(f.density) ? ['Densidad', `${fmtNum(f.density)} g/ml`] : null,
       ['Referencia', val(f.reference)],
     ])}
     ${gone ? '' : `<div class="actions spaced"><a class="btn secondary small" href="#formulas--${esc(f.uuid)}--editar">Editar fórmula</a><a class="btn secondary small" href="#valoracion--formula--${esc(f.uuid)}">Precio de valoración</a></div>`}
   </div>
-  <section><h2>Composición</h2><ul class="list">${(f.components || []).map((c) => `<li><div class="row"><span class="row-main">${esc(c.ingredient)} ${compTags(c)}</span><b class="num">${fmtNum(c.amount)} ${esc(c.unit)}</b></div></li>`).join('')}</ul></section>
+  <section><h2>Composición</h2><ul class="list">${(f.components || []).map((c) => { const pct = compPct(c, f, f.unit); return `<li><div class="row"><span class="row-main">${esc(c.ingredient)} ${compTags(c)}${pct ? `<span class="sub"><span>${esc(pct)}</span></span>` : ''}</span><b class="num">${fmtNum(c.amount)} ${esc(c.unit)}</b></div></li>`; }).join('')}</ul></section>
   <section><h2>Códigos nacionales</h2>${cns.length
     ? `<ul class="list">${cns.map((c, i) => `<li><div class="row"><div class="row-main"><strong>${esc(c.presentation || '—')}</strong>${c.concentration || tasados[i] ? `<span class="sub">${c.concentration ? `<span>${esc(c.concentration)}</span>` : ''}${tasados[i] ? `<span class="doc-tag pa">PVP tasado ${money(tasados[i].pvp)}</span>` : ''}</span>` : ''}</div><b class="num">CN ${esc(c.cn)}</b></div></li>`).join('')}</ul>`
     : '<p class="hint none-docs">Sin códigos nacionales. Añádelos desde «Editar fórmula».</p>'}</section>
@@ -117,10 +116,9 @@ async function viewFormulaForm(id) {
       ${field('Plazo de validez (días)', `<input type="text" inputmode="numeric" name="validity_days" value="${esc(v.validity_days ?? '')}" maxlength="4">`)}
     </div>
     <div class="grid2">
-      ${field('Lote de referencia', decimal('target_amount', `value="${esc(inputNum(v.target_amount))}" required`))}
+      ${field('Lote de referencia', decimal('target_amount', `value="${esc(inputNum(v.target_amount))}" required`), 'Cantidad total para la que está escrita la composición. Si la escribes en porcentajes, pon 100.')}
       ${field('Unidad', `<select name="unit">${options(FORMULA_UNITS, v.unit || 'g')}</select>`)}
     </div>
-    ${field('Densidad del preparado (g/ml)', decimal('density', `value="${esc(inputNum(v.density))}"`), 'Opcional. Permite elaborarla en volumen si está escrita en gramos, o al revés (por ejemplo, 1,02).')}
     ${field('Referencia bibliográfica o normativa', text('reference', `value="${esc(v.reference || '')}" maxlength="200"`))}
     <fieldset class="comps"><legend>Composición para el lote de referencia</legend>
       <div data-rows="comp">${comps.map((c) => componentRow(c)).join('')}</div>
@@ -210,15 +208,13 @@ Object.assign(FORMS, {
     const seen = new Set();
     national_codes.forEach((c) => { if (seen.has(c.cn)) throw new InputError(`El CN ${c.cn} está repetido.`); seen.add(c.cn); });
     const validity = intOrNull(d.validity_days, 'Plazo de validez');
-    const density = parseNum(d.density, 'Densidad');
-    if (density !== null && (density < 0.1 || density > 5)) throw new InputError('La densidad debe estar entre 0,1 y 5 g/ml.');
     const rec = {
       ...(prev || { uuid: newId(), status: STATUS.formula[d.status] ? d.status : 'borrador' }),
       name: name.slice(0, 160), code: str(d.code).slice(0, 80), version: str(d.version).slice(0, 30) || '1',
       type: FORMULA_TYPES[d.type] ? d.type : 'fm', form: str(d.form).slice(0, 80), route: str(d.route).slice(0, 80),
       retention_class: RETENTION_CLASSES[d.retention_class] ? d.retention_class : 'general',
       storage: str(d.storage).slice(0, 160), validity_days: validity, reference: str(d.reference).slice(0, 200),
-      target_amount: target, unit: FORMULA_UNITS.includes(d.unit) ? d.unit : 'g', density, components, national_codes,
+      target_amount: target, unit: FORMULA_UNITS.includes(d.unit) ? d.unit : 'g', components, national_codes,
       // los PNT en la papelera no salen en la lista, pero se conserva el vínculo por si se restauran
       pnt_uuids: [...new Set([...all.getAll('pnt_uuids').filter((x) => ID_RE.test(x)), ...(prev ? (prev.pnt_uuids || []).filter((u) => trashedPnts.has(u)) : [])])],
     };
