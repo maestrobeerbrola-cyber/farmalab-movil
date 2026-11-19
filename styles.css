@@ -552,3 +552,10 @@ li.ok .check-mark { background: var(--green-bg); color: var(--green-ink); }
 li.bad .check-mark { background: var(--red-bg); color: var(--red); }
 li.warn .check-mark { background: var(--amber-bg); color: var(--amber); }
 li.bad strong { color: var(--red); }
+
+/* Índice de materias primas: nº de cada sustancia y numeración de sus envases */
+.subno { flex: none; min-width: 3.4em; padding: 5px 8px; border-radius: 8px; background: var(--green-bg); color: var(--green-ink); font-weight: 700; font-variant-numeric: tabular-nums; text-align: center; }
+.subbox { margin: 2px 0 14px; }
+.subbox > .msg { margin: 0; }
+.subbox > .grid2 { margin-top: 12px; }
+.subpending { margin-bottom: 14px; }

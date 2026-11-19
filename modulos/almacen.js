@@ -1,7 +1,7 @@
 'use strict';
 /* FARMA·LAB móvil · Almacén: materias primas (PN/L/PG/005) y material de acondicionamiento (PN/L/PG/006). */
 
-const STORE_TABS = [['#materias', 'Materias primas'], ['#envases', 'Acondicionamiento']];
+const STORE_TABS = [['#materias', 'Materias primas'], ['#indicemp', 'Índice'], ['#envases', 'Acondicionamiento']];
 const KIND_LABELS = { activo: 'Principio activo', excipiente: 'Excipiente', ambos: 'Principio activo o excipiente, según la fórmula' };
 const KIND_TAGS = { activo: 'PA', ambos: 'PA / EXC' };
 const kindTag = (k) => (KIND_TAGS[k] ? `<span class="doc-tag pa">${KIND_TAGS[k]}</span>` : '');
@@ -55,7 +55,7 @@ function nextInternalNo(list, first = 'MP-0001') {
 }
 const AEMPS_ALERTS_URL = 'https://www.aemps.gob.es/comunicacion/alertas/alertas-farmaceuticas-y-retiradas-de-lotes-de-medicamentos-de-uso-humano-por-defectos-de-calidad/';
 
-ROUTES.materias = (arg, extra) => (arg === 'nueva' ? viewMaterialForm() : arg === 'archivo' ? viewArchive('material') : arg && extra === 'editar' ? viewMaterialForm(arg) : arg ? viewMaterial(arg) : viewMaterials());
+ROUTES.materias = (arg, extra) => (arg === 'nueva' ? viewMaterialForm(null, extra) : arg === 'archivo' ? viewArchive('material') : arg && extra === 'editar' ? viewMaterialForm(arg) : arg ? viewMaterial(arg) : viewMaterials());
 ROUTES.envases = (arg, extra) => (arg === 'nuevo' ? viewPackagingForm() : arg === 'archivo' ? viewArchive('packaging') : arg && extra === 'editar' ? viewPackagingForm(arg) : arg ? viewPackaging(arg) : viewPackagings());
 
 // ------------------------------------------------------------------ archivo: lotes terminados, caducados y rechazados
@@ -191,11 +191,13 @@ async function viewMaterial(id) {
   const used = (await getLive('production')).filter((p) => (p.weighings || []).some((w) => w.material_uuid === m.uuid || (w.material_lot && lc(w.material_lot) === lc(m.lot) && fold(w.ingredient) === fold(m.name))));
   const q = encodeURIComponent(m.name);
   const retFact = await retentionFact('material', m);
+  const sub = substanceOf(m, await getAll('substance'));
+  const subLink = sub ? ` <span class="hint">· <a href="#indicemp--${esc(sub.uuid)}">nº ${sub.number} del índice</a></span>` : '';
   return `<div class="panel">
     <div class="head-row"><h2 class="big">${esc(m.name)}</h2>${reason ? archivePill(m, 'material') : pill('material', m.status)}</div>
     ${archiveBanner(m, 'material')}
     ${facts([
-      ['Nº registro interno', m.internal_no ? `<strong>${esc(m.internal_no)}</strong>` : '<span class="warn">Sin asignar</span>'],
+      ['Nº registro interno', `${m.internal_no ? `<strong>${esc(m.internal_no)}</strong>` : '<span class="warn">Sin asignar</span>'}${subLink}`],
       ['Tipo', `${esc(KIND_LABELS[m.kind] || 'Sin indicar')}${m.edo ? ' · <span class="warn">Excipiente de declaración obligatoria</span>' : ''}`],
       ['Proveedor', val(m.supplier)],
       ['Lote', val(m.lot)],
@@ -228,7 +230,7 @@ async function viewMaterial(id) {
   ${reason ? `<section><h2>Registro</h2>
     <p><a class="btn block secondary" href="#fichamp--${esc(m.uuid)}">${ICON.doc}Registro y especificaciones en PDF (${esc((await loadSettings()).fn.mp_code)})</a></p></section>`
     : `<section><h2>Decisión de aceptación o rechazo</h2>${statusButtons('material', m)}
-    <p class="hint">Al aceptar o rechazar, la decisión queda fechada y firmada con tu nombre. Al aceptar se le da el nº de registro interno, que se anota en el registro y en la etiqueta del envase.</p>
+    <p class="hint">Al aceptar o rechazar, la decisión queda fechada y firmada con tu nombre. El nº de registro interno se le da al registrar la recepción: anótalo en la etiqueta del envase.</p>
     ${m.status === 'rechazado' ? disposalForm(m, 'material') : ''}
     ${m.status === 'aceptado' ? reviewBlock(m, 'material') : ''}
     ${statusLabelButton('material', m)}
@@ -365,18 +367,72 @@ function eliminationForm(p) {
   </form>`;
 }
 
-function viewMaterialFormHtml(m) {
-  const v = m || { status: 'cuarentena', received_date: todayIso(), unit: 'g', kind: 'excipiente' };
+/* Lote nuevo: el nº de registro interno sale del índice de materias primas (109 → 109.4) y se asigna al registrarlo.
+   Si la materia prima no está en el índice, se añade con el nº que se indique (se propone el siguiente libre). */
+const SUB_HINT = 'Si está en el índice de materias primas, el envase toma su nº siguiente (por ejemplo, 109.4). Si no, se añade al índice al registrar el lote.';
+function subBoxHtml(subs) {
+  return `<datalist id="subList">${liveSubs(subs).sort(byText('name')).map((s) => `<option value="${esc(s.name)}">${s.number}</option>`).join('')}</datalist>
+    <div class="subbox" data-sub-box>
+      <p class="msg plain" data-sub-info>${esc(SUB_HINT)}</p>
+      <div class="grid2" data-sub-new hidden>
+        ${field('Nº de la materia prima', '<input type="text" inputmode="numeric" name="sub_number" maxlength="6" data-sub-num>', 'Se propone el siguiente libre. Si ya tiene nº en vuestro libro, pon ese.')}
+        ${field('Envases ya numerados', '<input type="text" inputmode="numeric" name="sub_prior" value="0" maxlength="6" data-sub-num>', 'Fuera de la app. Si el último del libro fue el 109.3, pon 3.')}
+      </div>
+    </div>`;
+}
+/** Explica qué nº tomará el envase según el nombre escrito. commit: al salir de la casilla (muestra el alta en el índice). */
+async function updateSubBox(form, commit) {
+  const box = $('[data-sub-box]', form);
+  if (!box) return;
+  const tok = String(Number(box.dataset.tok || 0) + 1);
+  box.dataset.tok = tok;
+  const [subs, lots] = await Promise.all([getAll('substance'), getAll('material')]);
+  if (box.dataset.tok !== tok) return;
+  const info = $('[data-sub-info]', box);
+  const fresh = $('[data-sub-new]', box);
+  const name = str(form.elements.name.value);
+  const sub = liveSubs(subs).find((s) => sameName(s.name, name));
+  if (sub) {
+    fresh.hidden = true;
+    info.innerHTML = `${esc(sub.name)} tiene el nº <strong>${sub.number}</strong> en el índice. Este envase será el <strong>${esc(nextInternalFor(sub, lots))}</strong>.`;
+    return;
+  }
+  if (!name || (!commit && fresh.hidden)) { fresh.hidden = true; info.textContent = SUB_HINT; return; }
+  fresh.hidden = false;
+  const num = form.elements.sub_number;
+  if (!num.dataset.touched || !str(num.value)) num.value = String(proposedNumber(name, subs, lots));
+  const n = /^\d+$/.test(str(num.value)) ? Number(str(num.value)) : NaN;
+  const prior = /^\d+$/.test(str(form.elements.sub_prior.value)) ? Number(str(form.elements.sub_prior.value)) : 0;
+  const owner = liveSubs(subs).find((s) => s.number === n);
+  info.innerHTML = `${esc(name)} aún no está en el índice: se añadirá al registrar el lote.${owner ? ` <span class="bad">El nº ${n} ya es de ${esc(owner.name)}.</span>` : Number.isInteger(n) && n > 0 ? ` Este envase será el <strong>${n}.${lastSeq(n, lots, prior) + 1}</strong>.` : ''}`;
+}
+INPUT_HOOKS.push((t) => {
+  if (t.matches('[data-sub-num]')) { if (t.name === 'sub_number') t.dataset.touched = '1'; updateSubBox(t.form, true); }
+  else if (t.matches('[data-sub-name]')) updateSubBox(t.form, false);
+});
+CHANGE_HOOKS.push((t) => { if (t.matches('[data-sub-name]')) updateSubBox(t.form, true); });
+// Recepción abierta desde la ficha del índice: el nombre ya viene puesto, así que se copian sus especificaciones.
+AFTER_RENDER.push(() => {
+  const el = $('form[data-form="material"]:not([data-id]) [data-prefilled]');
+  if (!el) return;
+  el.removeAttribute('data-prefilled');
+  el.dispatchEvent(new Event('input', { bubbles: true }));
+  el.dispatchEvent(new Event('change', { bubbles: true }));
+});
+
+function viewMaterialFormHtml(m, subs = [], preset = null) {
+  const v = m || { status: 'cuarentena', received_date: todayIso(), unit: 'g', kind: 'excipiente', name: preset ? preset.name : '' };
   const detected = edoMatch(v.name);
+  const kindField = field('Tipo', `<select name="kind">${options(Object.keys(KIND_LABELS), v.kind || 'excipiente', { ...KIND_LABELS, ambos: 'Activo o excipiente' })}</select>`, 'Uso habitual. Lo que cuenta es la función que se marca en cada fórmula.');
   return `<form class="form" data-form="material" ${m ? `data-id="${esc(m.uuid)}"` : ''}${m && isDay(m.retest_date) ? ' data-retest' : ''} novalidate>
     ${formMsg()}
     <fieldset class="group"><legend>Identificación</legend>
-      ${field('Nombre (DOE o DCI)', text('name', `value="${esc(v.name || '')}" required maxlength="160" data-edo-source`))}
+      ${field('Nombre (DOE o DCI)', text('name', `value="${esc(v.name || '')}" required maxlength="160" data-edo-source${m ? '' : ` data-sub-name list="subList" autocomplete="off"${preset ? ' data-prefilled' : ''}`}`))}
       <p class="hint edo-hint" data-edo-hint>${detected ? `Figura como excipiente de declaración obligatoria: ${esc(detected)}.` : ''}</p>
-      <div class="grid2">
-        ${field('Tipo', `<select name="kind">${options(Object.keys(KIND_LABELS), v.kind || 'excipiente', { ...KIND_LABELS, ambos: 'Activo o excipiente' })}</select>`, 'Uso habitual. Lo que cuenta es la función que se marca en cada fórmula.')}
-        ${field('Nº registro interno', text('internal_no', `value="${esc(v.internal_no || '')}" maxlength="40"`), 'Si se deja vacío, se asigna el siguiente al aceptar el lote.')}
-      </div>
+      ${m ? `<div class="grid2">
+        ${kindField}
+        ${field('Nº registro interno', text('internal_no', `value="${esc(v.internal_no || '')}" maxlength="40"`), 'Nº de la materia prima en el índice y nº de envase (109.4). Si lo dejas vacío, toma el siguiente.')}
+      </div>` : `${subBoxHtml(subs)}${kindField}`}
       ${checkbox('edo', 'Excipiente de declaración obligatoria', m ? m.edo : Boolean(detected), 'data-edo-check')}
     </fieldset>
     <fieldset class="group"><legend>Recepción</legend>
@@ -430,10 +486,13 @@ function viewMaterialFormHtml(m) {
     <button class="btn block" type="submit">${m ? 'Guardar cambios' : 'Registrar lote'}</button>
   </form>`;
 }
-async function viewMaterialForm(id) {
+async function viewMaterialForm(id, subId) {
   const m = id ? await getOne('material', id) : null;
   if (id && !m) return empty('Este lote no existe.', '');
-  return viewMaterialFormHtml(m);
+  const subs = m ? [] : await getAll('substance');
+  const preset = subId ? liveSubs(subs).find((s) => s.uuid === subId) || null : null;
+  if (preset) state.parent = `#indicemp--${preset.uuid}`;
+  return viewMaterialFormHtml(m, subs, preset);
 }
 
 // El campo de descripción del envase solo aparece si el envase sirve de acondicionamiento.
@@ -476,7 +535,7 @@ Object.assign(FORMS, {
   async material(form) {
     const d = formData(form);
     const prev = form.dataset.id ? await getOne('material', form.dataset.id) : null;
-    const name = str(d.name); const lot = str(d.lot); const code = str(d.code); const internal = str(d.internal_no);
+    const name = str(d.name); const lot = str(d.lot); const code = str(d.code);
     if (!name || !lot) throw new InputError('El nombre y el lote son obligatorios.');
     const quantity = parseNum(d.quantity, prev ? 'Stock actual' : 'Cantidad recibida');
     if (quantity === null || quantity < 0) throw new InputError('Indica la cantidad.');
@@ -488,13 +547,40 @@ Object.assign(FORMS, {
     };
     if (!prev && !inspectionDone(reception)) throw new InputError('Marca las tres comprobaciones de la recepción. Si alguna no se cumple, la materia prima no se registra: se devuelve al proveedor.');
     if (d.pack_included === 'on' && !str(d.pack_desc)) throw new InputError('Describe el envase que sirve de acondicionamiento (por ejemplo: frasco de plástico de 100 ml con aplicadores).');
+    // Nº de registro interno: el siguiente de su materia prima en el índice (109.4); si no está, se añade al índice.
+    const [subsAll, lotsAll] = await Promise.all([getAll('substance'), getAll('material')]);
+    const live = liveSubs(subsAll);
+    const others = lotsAll.filter((x) => !prev || x.uuid !== prev.uuid);
+    let sub = null; let newSub = null; let internal = '';
+    if (!prev) {
+      sub = live.find((s) => sameName(s.name, name)) || null;
+      if (!sub) {
+        newSub = {
+          uuid: newId(), name: name.slice(0, 160),
+          number: intOrNull(d.sub_number, 'Nº de la materia prima') ?? proposedNumber(name, subsAll, lotsAll),
+          prior_count: intOrNull(d.sub_prior, 'Envases ya numerados') ?? 0, notes: '',
+        };
+        checkSubstance(newSub, null, subsAll, lotsAll);
+        sub = newSub;
+      }
+      internal = nextInternalFor(sub, lotsAll);
+    } else {
+      // Si se cambia el nombre, el lote pasa a la materia prima del índice con ese nombre (si la hay).
+      sub = (sameName(prev.name, name) && live.find((s) => s.uuid === prev.substance_uuid)) || live.find((s) => sameName(s.name, name)) || null;
+      internal = str(d.internal_no);
+      if (!internal && sub) internal = nextInternalFor(sub, others);
+      const p = parseInternal(internal);
+      if (p && sub && p.n !== sub.number) throw new InputError(`El nº ${internal} no es de ${sub.name}, que tiene el nº ${sub.number} en el índice. Corrígelo o deja la casilla vacía para darle el siguiente (${nextInternalFor(sub, others)}).`);
+      const owner = p && !sub && live.find((s) => s.number === p.n);
+      if (owner) throw new InputError(`El nº ${internal} es de la numeración de ${owner.name} (nº ${owner.number} en el índice).`);
+    }
     await uniqueInternal('material', internal, prev && prev.uuid);
-    if (code && (await getAll('material')).some((m) => m.uuid !== (prev && prev.uuid) && m.code && lc(m.code) === lc(code) && lc(m.lot) === lc(lot))) {
+    if (code && lotsAll.some((m) => m.uuid !== (prev && prev.uuid) && m.code && lc(m.code) === lc(code) && lc(m.lot) === lc(lot))) {
       throw new InputError('Ya existe ese código de artículo con el mismo lote.');
     }
     const rec = {
       ...(prev || { uuid: newId(), status: 'cuarentena', quantity_received: quantity }),
-      name: name.slice(0, 160), kind: KIND_LABELS[d.kind] ? d.kind : 'excipiente', edo: d.edo === 'on', internal_no: internal.slice(0, 40),
+      name: name.slice(0, 160), kind: KIND_LABELS[d.kind] ? d.kind : 'excipiente', edo: d.edo === 'on', internal_no: internal.slice(0, 40), substance_uuid: sub ? sub.uuid : '',
       pack_included: d.pack_included === 'on', pack_desc: d.pack_included === 'on' ? str(d.pack_desc).slice(0, 160) : '',
       supplier: str(d.supplier).slice(0, 160), lot: lot.slice(0, 100), qc_no: str(d.qc_no).slice(0, 80),
       received_date: isDay(d.received_date) ? d.received_date : null, containers,
@@ -506,8 +592,11 @@ Object.assign(FORMS, {
       monograph: str(d.monograph).slice(0, 160), storage: str(d.storage).slice(0, 200),
       handling: str(d.handling).slice(0, 1000), toxicity: str(d.toxicity).slice(0, 1000), observations: str(d.observations).slice(0, 2000),
     };
-    await save('material', rec, prev ? 'edicion_materia_prima' : 'alta_lote_materia_prima', `${rec.name} / ${rec.lot}${rec.internal_no ? ` (${rec.internal_no})` : ''}`);
-    toast(prev ? 'Ficha guardada.' : 'Lote registrado. Queda en cuarentena hasta su aceptación.');
+    // Al añadir la materia prima al índice se enlazan también sus lotes anteriores (conservan su nº).
+    const linked = newSub ? lotsToLink(newSub, others) : [];
+    await saveMany([...(newSub ? [['substance', newSub]] : []), ['material', rec], ...linked], prev ? 'edicion_materia_prima' : 'alta_lote_materia_prima', `${rec.name} / ${rec.lot}${rec.internal_no ? ` (${rec.internal_no})` : ''}`,
+      newSub ? [['alta_indice_mp', `${newSub.number} ${newSub.name}`]] : []);
+    toast(prev ? 'Ficha guardada.' : `Lote registrado con el nº ${rec.internal_no}${newSub ? ` (${rec.name}, nº ${newSub.number}, añadida al índice)` : ''}. Queda en cuarentena hasta su aceptación.`);
     location.hash = `#materias--${rec.uuid}`;
   },
 
@@ -553,10 +642,11 @@ STATUS_CHECKS.material = async (m, status) => {
   if (status === 'rechazado') {
     return { title: 'Rechazar materia prima', message: `Se registrará el rechazo de ${m.name} (lote ${m.lot}) con fecha de hoy y a tu nombre. Debe devolverse al proveedor o eliminarse lo antes posible, y mantenerse aparte y etiquetada mientras tanto. Después registra su destino.`, confirmLabel: 'Rechazar', danger: true };
   }
-  // PN/L/PG/005/00, 4.2: al aceptarla se le da el nº de registro interno (si aún no lo tiene).
-  const proposed = m.internal_no ? '' : nextInternalNo(await getAll('material'));
+  // El nº de registro interno se da al registrar la recepción; los lotes anteriores que no lo tengan lo toman al aceptarlos.
+  const sub = m.internal_no ? null : substanceOf(m, await getAll('substance'));
+  const proposed = sub ? nextInternalFor(sub, await getAll('material')) : '';
   const missing = [];
-  if (!m.internal_no && !proposed) missing.push('el nº de registro interno');
+  if (!m.internal_no && !proposed) missing.push(`el nº de registro interno (añade ${m.name} al índice de materias primas)`);
   if (!inspectionDone(m.reception)) missing.push('la inspección en la recepción');
   const hasBulletin = (await docsOf(m.uuid)).some((f) => f.kind === 'boletin');
   if (!m.qc_no && !hasBulletin) missing.push('el nº de control de calidad o el boletín de análisis');
@@ -571,7 +661,7 @@ STATUS_CHECKS.material = async (m, status) => {
       ? `Falta ${missing.join('; ')}. Mientras no se compruebe que cumple sus especificaciones, debería seguir en cuarentena.${numberLine}\n\n¿Aceptarla igualmente?`
       : `Se registrará la aceptación de ${m.name} (lote ${m.lot}) con fecha de hoy y a tu nombre.${numberLine}`,
     confirmLabel: missing.length ? 'Aceptar igualmente' : 'Aceptar',
-    apply: proposed ? (rec) => { rec.internal_no = proposed; } : null,
+    apply: proposed ? (rec) => { rec.internal_no = proposed; rec.substance_uuid = sub.uuid; } : null,
   };
 };
 

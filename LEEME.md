@@ -1,4 +1,4 @@
-# FARMA·LAB móvil v0.3.28 (prototipo)
+# FARMA·LAB móvil v0.3.29 (prototipo)
 
 App que se instala desde Chrome o Edge (Android y Windows) y funciona sin conexión. Los datos se guardan **en el propio dispositivo** y, si se configura, se sincronizan entre el móvil y el PC a través de Google Drive.
 
@@ -14,6 +14,13 @@ App que se instala desde Chrome o Edge (Android y Windows) y funciona sin conexi
 - **Temperaturas** (PN/L/PG/009/00): lectura diaria del local y la nevera, incidencias y registro mensual en PDF.
 - **Documentos**: PNT y bibliografía con su PDF, Word o foto, que se consultan dentro de la app, también sin conexión.
 - Registro de actividad, bloqueo con PIN, exportar e importar copias.
+
+## Novedades de la v0.3.29
+- **Índice de materias primas** (Almacén → Índice): cada materia prima tiene su nº (Finastopic, 109) y cada envase que se recibe toma como nº de registro interno el siguiente: 109.1, 109.2, 109.3… Se asigna solo **al registrar la recepción** (PN/L/PG/005/00, 4.1.2), y la ficha del índice muestra sus envases y el próximo nº.
+- En el alta de un lote, al escribir el nombre se ve qué nº tendrá el envase. Si la materia prima no está en el índice, se añade con el nº que se indique (se propone el siguiente libre), y se puede indicar hasta qué envase se numeró antes en el libro (si el último fue el 109.3, el siguiente será el 109.4).
+- Las materias primas con lotes que aún no están en el índice salen en un aviso del índice; las que ya se numeraban a mano con el formato 109.3 se añaden con un toque. Los lotes ya registrados conservan su nº.
+- Al editar un lote, si se deja vacío el nº, toma el siguiente de su materia prima; si no corresponde a su nº del índice, avisa. Si al sincronizar dos equipos se repite un nº, sale un aviso.
+- Base de datos v6, copias en formato 6 y sincronización en formato 4: actualiza la app en los dos equipos.
 
 ## Novedades de la v0.3.28
 - **Eliminar una elaboración en proceso** si finalmente no se elabora (botón «Eliminar la elaboración» al final de su guía). Todavía no tiene lote ni ha descontado stock, así que no deja huecos en la numeración. Pasa a la papelera (Ajustes → Papelera), donde se puede restaurar o **borrar del todo** junto con su receta. Las elaboradas no se eliminan: se rechazan, para que queden en el registro.

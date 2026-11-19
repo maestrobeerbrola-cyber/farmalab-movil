@@ -6,12 +6,12 @@
  * sincronizarlo más adelante con la versión de PC.
  */
 
-const APP_VERSION = '0.3.28';
+const APP_VERSION = '0.3.29';
 const PREVIEW = document.documentElement.dataset.preview === '1'; // copia de prueba publicada en Claude
 const DB_NAME = 'farmalab-movil';
 const EXPORT_FORMAT = 'farmalab-datos';
-const EXPORT_FORMAT_VERSION = 5;          // 3: acondicionamiento, bibliografía, documentos de cualquier ficha y ajustes · 4: temperaturas · 5: balanzas
-const DB_VERSION = 5;                     // 3: acondicionamiento, bibliografía, documentos genéricos, estados de elaboración · 4: temperaturas · 5: balanzas
+const EXPORT_FORMAT_VERSION = 6;          // 3: acondicionamiento, bibliografía, documentos de cualquier ficha y ajustes · 4: temperaturas · 5: balanzas · 6: índice de materias primas
+const DB_VERSION = 6;                     // 3: acondicionamiento, bibliografía, documentos genéricos, estados de elaboración · 4: temperaturas · 5: balanzas · 6: índice de materias primas
 const FILE_STORE = 'pnt_file';            // documentos adjuntos (PNT, materias primas, acondicionamiento, bibliografía)
 const MAX_DOC_BYTES = 25 * 1048576;
 const DOC_TYPES = {
@@ -31,7 +31,7 @@ const RECETA_ACCEPT = DOC_ACCEPT;
  * (local_only), no van en las copias ni en la sincronización, y su nombre de archivo no pasa al registro de actividad.
  */
 const isLocalOnly = (f) => Boolean(f && (f.local_only || f.kind === 'receta'));
-const STORES = ['material', 'packaging', 'formula', 'pnt', 'biblio', 'production', 'temperature', 'temp_incident', 'balance', 'balance_check', 'audit'];
+const STORES = ['material', 'packaging', 'formula', 'pnt', 'biblio', 'production', 'temperature', 'temp_incident', 'balance', 'balance_check', 'substance', 'audit'];
 const LOCK_HIDDEN_MS = 5 * 60 * 1000;   // bloqueo tras 5 min con la app en segundo plano
 const LOCK_IDLE_MS = 15 * 60 * 1000;    // o tras 15 min sin tocar la pantalla
 const PBKDF2_ITERATIONS = 200000;
@@ -116,6 +116,7 @@ const SECTIONS = {
   ficha: { title: 'Ficha de registro', tab: 3 },
   fichamp: { title: 'Registro de la materia prima', tab: 1 },
   registromp: { title: 'Registro de materias primas', tab: 1 },
+  indicemp: { title: 'Índice', tab: 1 },
   registroac: { title: 'Registro de acondicionamiento', tab: 1 },
   temperaturas: { title: 'Temperaturas', tab: 4 },
   registrotemp: { title: 'Registro de temperaturas', tab: 4 },
@@ -351,11 +352,11 @@ const getAll = (s) => tx(s, 'readonly', (t) => t.objectStore(s).getAll());
  * Al ser un cambio más del registro, viaja en las copias y se aplica en el otro equipo al importarlas.
  */
 const getLive = async (s) => (await getAll(s)).filter((r) => !r.deleted_at);
-const DELETABLE = { formula: 'Fórmula', pnt: 'PNT', production: 'Elaboración' };
-const DELETED_WHAT = { formula: 'fórmula', pnt: 'PNT', production: 'elaboración' };
-const DELETED_ROUTE = { formula: 'formulas', pnt: 'pnt', production: 'elaboraciones' };
+const DELETABLE = { formula: 'Fórmula', pnt: 'PNT', production: 'Elaboración', substance: 'Materia prima del índice' };
+const DELETED_WHAT = { formula: 'fórmula', pnt: 'PNT', production: 'elaboración', substance: 'materia prima del índice' };
+const DELETED_ROUTE = { formula: 'formulas', pnt: 'pnt', production: 'elaboraciones', substance: 'indicemp' };
 const delG = (store) => (store === 'pnt' ? 'o' : 'a');   // eliminado / eliminada
-const recordName = (store, r) => (store === 'pnt' ? `${r.code} ${r.title}` : store === 'production' ? `${r.record_code} ${r.formula_name}` : `${r.name}${r.version ? ` (versión ${r.version})` : ''}`);
+const recordName = (store, r) => (store === 'pnt' ? `${r.code} ${r.title}` : store === 'production' ? `${r.record_code} ${r.formula_name}` : store === 'substance' ? `${r.number} ${r.name}` : `${r.name}${r.version ? ` (versión ${r.version})` : ''}`);
 const getOne = (s, id) => tx(s, 'readonly', (t) => t.objectStore(s).get(id));
 const metaGet = (k) => tx('meta', 'readonly', (t) => t.objectStore('meta').get(k));
 const metaSet = (k, v) => tx('meta', 'readwrite', (t) => t.objectStore('meta').put(v, k));
@@ -793,10 +794,10 @@ async function viewTrash() {
   rows.sort((a, b) => String(b.r.deleted_at).localeCompare(String(a.r.deleted_at)));
   const href = ({ st, r }) => `#${DELETED_ROUTE[st]}--${r.uuid}`;
   const purge = (x) => (x.st === 'production' ? `<button class="btn danger-outline small" data-act="purgeRecord" data-store="production" data-id="${esc(x.r.uuid)}">Borrar del todo</button>` : '');
-  return `<p class="hint intro">Las fórmulas, los PNT y las elaboraciones en proceso eliminados se guardan aquí. Al restaurarlos vuelven a su lista con sus documentos y vínculos. Una elaboración se puede borrar del todo, con su receta.</p>
+  return `<p class="hint intro">Las fórmulas, los PNT, las elaboraciones en proceso y las materias primas quitadas del índice se guardan aquí. Al restaurarlos vuelven a su lista con sus documentos y vínculos. Una elaboración se puede borrar del todo, con su receta.</p>
     ${rows.length
       ? `<ul class="list">${rows.map((x) => `<li><div class="row"><a class="row-main" href="${esc(href(x))}"><span class="kind">${esc(DELETABLE[x.st])}</span><strong>${esc(recordName(x.st, x.r))}</strong><span class="sub"><span>Eliminad${delG(x.st)} el ${esc(fmtStamp(x.r.deleted_at))}${x.r.deleted_by ? ` por ${esc(x.r.deleted_by)}` : ''}</span></span></a><div class="row-actions"><button class="btn secondary small" data-act="restoreRecord" data-store="${x.st}" data-id="${esc(x.r.uuid)}">Restaurar</button>${purge(x)}</div></div></li>`).join('')}</ul>`
-      : empty('La papelera está vacía.', 'Aquí aparecerán las fórmulas, los PNT y las elaboraciones en proceso que elimines.')}`;
+      : empty('La papelera está vacía.', 'Aquí aparecerán las fórmulas, los PNT, las elaboraciones en proceso y las entradas del índice que elimines.')}`;
 }
 /** Aviso de elemento eliminado, con el botón para restaurarlo. */
 function deletedBanner(store, r) {
@@ -838,7 +839,7 @@ async function renderRoute() {
   view.dataset.view = sec || 'inicio';
   view.dataset.depth = (!arg || arg === 'archivo') ? 'root' : (extra === 'editar' || ['nueva', 'nuevo'].includes(arg)) ? 'form' : 'detail';
   $('#title').textContent = info.title;
-  const sub = Boolean(arg) || ['ajustes', 'auditoria', 'papelera', 'conservacion', 'sincronizacion', 'calculadora', 'valoracion', 'etiqueta', 'registromp', 'registroac', 'registrotemp', 'registrobal', 'etiquetaestado'].includes(sec);
+  const sub = Boolean(arg) || ['ajustes', 'auditoria', 'papelera', 'conservacion', 'sincronizacion', 'calculadora', 'valoracion', 'etiqueta', 'registromp', 'indicemp', 'registroac', 'registrotemp', 'registrobal', 'etiquetaestado'].includes(sec);
   $('#backBtn').hidden = !sub;
   $('#mark').hidden = sub;
   $$('.tabbar a').forEach((a, i) => {
@@ -1072,7 +1073,7 @@ async function viewSettings() {
       ${persisted === true ? '' : '<button class="btn secondary" data-act="persist">Proteger datos</button><p class="hint">Si Chrome no lo permite, instala primero la app en la pantalla de inicio y vuelve a intentarlo.</p>'}
       ${standalone ? '<p class="hint">App instalada en el teléfono.</p>' : state.deferredInstall ? '<button class="btn secondary" data-act="install">Instalar en el teléfono</button>' : '<p class="hint">Para instalarla: menú de Chrome (⋮) y «Instalar aplicación».</p>'}
     </div></section>
-  <section><h2>Actividad</h2><ul class="list"><li><a class="row" href="#auditoria"><span class="row-main">Ver el registro de actividad</span></a></li><li><a class="row" href="#papelera"><span class="row-main">Papelera: fórmulas, PNT y elaboraciones eliminados</span></a></li><li><a class="row" href="#conservacion"><span class="row-main">Conservación: borrados programados</span></a></li></ul></section>
+  <section><h2>Actividad</h2><ul class="list"><li><a class="row" href="#auditoria"><span class="row-main">Ver el registro de actividad</span></a></li><li><a class="row" href="#papelera"><span class="row-main">Papelera: fórmulas, PNT, elaboraciones y entradas del índice</span></a></li><li><a class="row" href="#conservacion"><span class="row-main">Conservación: borrados programados</span></a></li></ul></section>
   <section><h2>Acerca de</h2><div class="panel"><dl class="facts">
       <dt>Versión</dt><dd>FARMA·LAB móvil ${APP_VERSION}</dd>
       <dt>Usuario</dt><dd>${esc(state.profile.name)}</dd>
@@ -1181,6 +1182,7 @@ function validRecord(store, r) {
     case 'temp_incident': return s(r.code) && s(r.point_id);
     case 'balance': return s(r.name) && optNum(r.max_g) && optNum(r.interval_days);
     case 'balance_check': return ID_RE.test(String(r.balance_uuid)) && ['interna', 'externa'].includes(r.kind) && isDay(r.date);
+    case 'substance': return s(r.name) && Number.isInteger(r.number) && r.number > 0;
     case 'audit': return s(r.action);
     default: return false;
   }
