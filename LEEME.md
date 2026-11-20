@@ -1,4 +1,4 @@
-# FARMA·LAB móvil v0.3.31 (prototipo)
+# FARMA·LAB móvil v0.3.32 (prototipo)
 
 App que se instala desde Chrome o Edge (Android y Windows) y funciona sin conexión. Los datos se guardan **en el propio dispositivo** y, si se configura, se sincronizan entre el móvil y el PC a través de Google Drive.
 
@@ -14,6 +14,13 @@ App que se instala desde Chrome o Edge (Android y Windows) y funciona sin conexi
 - **Temperaturas** (PN/L/PG/009/00): lectura diaria del local y la nevera, incidencias y registro mensual en PDF.
 - **Documentos**: PNT y bibliografía con su PDF, Word o foto, que se consultan dentro de la app, también sin conexión.
 - Registro de actividad, bloqueo con PIN, exportar e importar copias.
+
+## Novedades de la v0.3.32
+- **Varios farmacéuticos, cada uno con su PIN.** Al entrar se elige quién eres y se escribe tu PIN. Cada ficha lleva nombre, dos apellidos y nº de colegiado, y todo lo que se registra (recepciones, decisiones, elaboraciones, temperaturas, calibraciones, actividad…) queda firmado así: «Ana García López (nº col. 282812345)».
+- **Ajustes → Farmacéuticos**: quien gestiona farmacéuticos añade fichas (el propio farmacéutico escribe su PIN), da de baja (las firmas anteriores se conservan) y asigna un PIN nuevo a quien lo olvide. Cada uno puede corregir su ficha y cambiar su PIN.
+- El usuario único de versiones anteriores pasa a ser el primer farmacéutico, con su mismo PIN y permiso de gestión; un aviso pide completar los apellidos y el nº de colegiado. Si se usaba la app en el móvil y en el PC, al sincronizar aparecen dos fichas de la misma persona: un aviso pide dar de baja la que sobre.
+- Las fichas viajan con las copias y la sincronización (el PIN, solo cifrado), así que cada farmacéutico entra con el mismo PIN en los dos equipos. Para cambiar de farmacéutico, bloquea la app con el candado.
+- Base de datos v7, copias en formato 7 y sincronización en formato 5: actualiza la app en los dos equipos.
 
 ## Novedades de la v0.3.31
 - **Sin densidad.** Al elaborar se indica el **peso total (g) o el volumen total (ml)** y cada componente se calcula con su porcentaje en la fórmula: 5 % de 60 ml = 3 g. Se quita la densidad que pedía la v0.3.30 (también de la fórmula).

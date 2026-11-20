@@ -6,12 +6,12 @@
  * sincronizarlo más adelante con la versión de PC.
  */
 
-const APP_VERSION = '0.3.31';
+const APP_VERSION = '0.3.32';
 const PREVIEW = document.documentElement.dataset.preview === '1'; // copia de prueba publicada en Claude
 const DB_NAME = 'farmalab-movil';
 const EXPORT_FORMAT = 'farmalab-datos';
-const EXPORT_FORMAT_VERSION = 6;          // 3: acondicionamiento, bibliografía, documentos de cualquier ficha y ajustes · 4: temperaturas · 5: balanzas · 6: índice de materias primas
-const DB_VERSION = 6;                     // 3: acondicionamiento, bibliografía, documentos genéricos, estados de elaboración · 4: temperaturas · 5: balanzas · 6: índice de materias primas
+const EXPORT_FORMAT_VERSION = 7;          // 3: acondicionamiento, bibliografía, documentos de cualquier ficha y ajustes · 4: temperaturas · 5: balanzas · 6: índice de materias primas · 7: farmacéuticos
+const DB_VERSION = 7;                     // 3: acondicionamiento, bibliografía, documentos genéricos, estados de elaboración · 4: temperaturas · 5: balanzas · 6: índice de materias primas · 7: farmacéuticos
 const FILE_STORE = 'pnt_file';            // documentos adjuntos (PNT, materias primas, acondicionamiento, bibliografía)
 const MAX_DOC_BYTES = 25 * 1048576;
 const DOC_TYPES = {
@@ -31,7 +31,7 @@ const RECETA_ACCEPT = DOC_ACCEPT;
  * (local_only), no van en las copias ni en la sincronización, y su nombre de archivo no pasa al registro de actividad.
  */
 const isLocalOnly = (f) => Boolean(f && (f.local_only || f.kind === 'receta'));
-const STORES = ['material', 'packaging', 'formula', 'pnt', 'biblio', 'production', 'temperature', 'temp_incident', 'balance', 'balance_check', 'substance', 'audit'];
+const STORES = ['material', 'packaging', 'formula', 'pnt', 'biblio', 'production', 'temperature', 'temp_incident', 'balance', 'balance_check', 'substance', 'pharmacist', 'audit'];
 const LOCK_HIDDEN_MS = 5 * 60 * 1000;   // bloqueo tras 5 min con la app en segundo plano
 const LOCK_IDLE_MS = 15 * 60 * 1000;    // o tras 15 min sin tocar la pantalla
 const PBKDF2_ITERATIONS = 200000;
@@ -55,7 +55,7 @@ const TONE = {
   en_proceso: 'amber', elaborada: 'blue', dispensada: 'green', rechazada: 'red', abierta: 'red', cerrada: 'green',
 };
 const ACTION_LABELS = {
-  inicio_sesion: 'Desbloqueo de la app',
+  inicio_sesion: 'Entrada en la app',
   alta_lote_materia_prima: 'Alta de lote de materia prima',
   edicion_materia_prima: 'Ficha de materia prima modificada',
   cambio_estado_materia_prima: 'Decisión sobre materia prima',
@@ -134,6 +134,7 @@ const SECTIONS = {
   valoracion: { title: 'Valoración' },
   ajustes: { title: 'Ajustes' },
   auditoria: { title: 'Actividad' },
+  farmaceuticos: { title: 'Farmacéuticos' },
 };
 
 /** Utillaje mínimo (RD 175/2001, equipamiento general) como lista inicial editable en Ajustes. */
@@ -188,7 +189,7 @@ const fold = (v) => String(v ?? '').toLocaleLowerCase('es').normalize('NFD').rep
 const edoMatch = (name) => { const n = fold(name); const hit = EDO_LIST.find(([, re]) => re.test(n)); return hit ? hit[0] : null; };
 
 const state = {
-  profile: null, deviceId: null, unlocked: false,
+  profile: null, pharmacists: [], lastPharmacist: null, deviceId: null, unlocked: false,
   hiddenAt: 0, lastTouch: Date.now(),
   deferredInstall: null, swWaiting: null, updateRequested: false,
   formulaCache: {}, materials: [], prevHash: '', parent: '#inicio', objectUrls: [],
@@ -644,37 +645,104 @@ function showGate(html) {
   gate.innerHTML = html;
   const shell = $('#shell');
   if (shell) shell.inert = true;
-  setTimeout(() => { const i = $('input', gate); if (i) i.focus(); }, 60);
+  setTimeout(() => { const i = $('input.pin', gate) || $('input:not([type=hidden])', gate); if (i) i.focus(); }, 60);
 }
 const gateBrand = `<div class="brand">${ICON.cross}<span>FARMA·LAB</span></div>`;
+
+// ------------------------------------------------------------------ farmacéuticos (cada uno con su PIN y su firma)
+const fullName = (p) => [p.first_name, p.last_name1, p.last_name2].map((x) => str(x)).filter(Boolean).join(' ');
+/** Firma que queda en los registros: «Ana García López (nº col. 282812345)». */
+const signatureOf = (p) => `${fullName(p)}${str(p.colegiado) ? ` (nº col. ${str(p.colegiado)})` : ''}`;
+/** Sesión: state.profile.name es la firma completa, que usan todos los registros. */
+const asProfile = (p) => ({ ...p, name: signatureOf(p), display: fullName(p) });
+const isAdmin = () => Boolean(state.profile && state.profile.admin);
+async function loadPharmacists() {
+  const all = await getAll('pharmacist');
+  state.pharmacists = all.filter((p) => p.active !== false).sort((a, b) => fullName(a).localeCompare(fullName(b), 'es'));
+  return all;
+}
+async function pinFields(pin) {
+  const salt = b64e(crypto.getRandomValues(new Uint8Array(16)));
+  return { pin_salt: salt, pin_iterations: PBKDF2_ITERATIONS, pin_hash: await hashPin(pin, salt, PBKDF2_ITERATIONS) };
+}
+const pinMatches = async (p, pin) => Boolean(p && p.pin_hash) && (await hashPin(pin || '', p.pin_salt, p.pin_iterations)) === p.pin_hash;
+/** Hasta v0.3.31 había un solo usuario por equipo: pasa a ser el primer farmacéutico, con su PIN y permiso de gestión. */
+async function migrateLegacyProfile() {
+  if ((await getAll('pharmacist')).length) return;
+  const old = await metaGet('profile');
+  if (!old || !old.pin_hash) return;
+  const stamp = nowIso();
+  const rec = {
+    uuid: old.uuid || newId(), first_name: str(old.name).slice(0, 80) || 'Farmacéutico', last_name1: '', last_name2: '', colegiado: '',
+    admin: true, active: true, migrated: true, pin_salt: old.pin_salt, pin_iterations: old.pin_iterations, pin_hash: old.pin_hash,
+    created_at: old.created_at || stamp, updated_at: stamp, device_id: state.deviceId,
+  };
+  await tx('pharmacist', 'readwrite', (t) => t.objectStore('pharmacist').put(rec));
+  await metaSet('lastPharmacist', rec.uuid);
+}
+const pinInput = (name, extra = '') => `<input class="pin" type="password" name="${name}" inputmode="numeric" pattern="[0-9]*" maxlength="8" ${extra}>`;
+/** Casillas de la ficha de farmacéutico (alta inicial y formulario de Ajustes). */
+function pharmacistFields(v = {}) {
+  return `${field('Nombre', text('first_name', `value="${esc(v.first_name || '')}" required maxlength="80" autocomplete="given-name" data-sig`))}
+    <div class="grid2">
+      ${field('Primer apellido', text('last_name1', `value="${esc(v.last_name1 || '')}" required maxlength="80" data-sig`))}
+      ${field('Segundo apellido', text('last_name2', `value="${esc(v.last_name2 || '')}" maxlength="80" data-sig`))}
+    </div>
+    ${field('Nº de colegiado', text('colegiado', `value="${esc(v.colegiado || '')}" required maxlength="20" inputmode="numeric" autocomplete="off" data-sig`), 'El del Colegio de Farmacéuticos.')}`;
+}
+/** Comprueba la ficha (lanza InputError) y la devuelve normalizada. */
+function readPharmacist(d) {
+  const r = { first_name: str(d.first_name).slice(0, 80), last_name1: str(d.last_name1).slice(0, 80), last_name2: str(d.last_name2).slice(0, 80), colegiado: str(d.colegiado).slice(0, 20) };
+  if (!r.first_name) throw new InputError('Escribe el nombre.');
+  if (!r.last_name1) throw new InputError('Escribe al menos el primer apellido.');
+  if (!r.colegiado) throw new InputError('Escribe el nº de colegiado.');
+  if (!/^[0-9A-Za-z][0-9A-Za-z /.-]{1,19}$/.test(r.colegiado)) throw new InputError('El nº de colegiado solo puede tener números, letras, espacios, barras o guiones.');
+  return r;
+}
+const colegiadoKey = (x) => str(x).toLowerCase().replace(/[^0-9a-z]/g, '');
 
 function setupHtml() {
   return `<form class="gate-card" data-form="setup" autocomplete="off">
     ${gateBrand}
-    <p>Configura la app en este teléfono. Los datos se guardan solo aquí: exporta copias de seguridad con regularidad.</p>
+    <p>Configura la app en este equipo empezando por tu ficha de farmacéutico. Después podrás añadir a los demás, cada uno con su PIN. Los datos se guardan solo aquí: exporta copias de seguridad con regularidad.</p>
     ${formMsg()}
-    ${field('Tu nombre', text('name', 'required maxlength="80" autocomplete="name"'), 'Aparecerá como operador en los registros.')}
-    ${field('PIN de acceso', '<input class="pin" type="password" name="pin" inputmode="numeric" pattern="[0-9]*" maxlength="8" required>', 'Entre 4 y 8 cifras. Si lo olvidas no se puede recuperar.')}
-    ${field('Repite el PIN', '<input class="pin" type="password" name="pin2" inputmode="numeric" pattern="[0-9]*" maxlength="8" required>')}
+    ${pharmacistFields()}
+    ${field('PIN de acceso', pinInput('pin', 'required'), 'Entre 4 y 8 cifras. Es personal: con él firmas los registros.')}
+    ${field('Repite el PIN', pinInput('pin2', 'required'))}
     <button class="btn block" type="submit">Empezar</button>
   </form>`;
 }
 function lockHtml() {
+  const list = state.pharmacists;
+  if (!list.length) {
+    return `<div class="gate-card">${gateBrand}<p>No hay ningún farmacéutico activo en este equipo.</p><button class="linklike" type="button" data-act="forgotPin">Opciones</button></div>`;
+  }
+  const sel = list.find((p) => p.uuid === state.lastPharmacist) || list[0];
+  const who = list.length > 1
+    ? `<fieldset class="who"><legend>¿Quién eres?</legend>${list.map((p) => `<label class="who-opt"><input type="radio" name="who" value="${esc(p.uuid)}"${p === sel ? ' checked' : ''}><span>${esc(fullName(p))}</span></label>`).join('')}</fieldset>`
+    : `<p>${esc(fullName(sel))}</p><input type="hidden" name="who" value="${esc(sel.uuid)}">`;
   return `<form class="gate-card" data-form="unlock" autocomplete="off">
     ${gateBrand}
-    <p>${esc(state.profile.name)}</p>
+    ${who}
     ${formMsg()}
-    ${field('PIN', '<input class="pin" type="password" name="pin" inputmode="numeric" pattern="[0-9]*" maxlength="8" required autocomplete="current-password">')}
-    <button class="btn block" type="submit">Desbloquear</button>
+    ${field('Tu PIN', pinInput('pin', 'required autocomplete="current-password"'))}
+    <button class="btn block" type="submit">Entrar</button>
     <button class="linklike" type="button" data-act="forgotPin">He olvidado el PIN</button>
   </form>`;
 }
+const lockKey = () => state.pharmacists.map((p) => `${p.uuid}:${fullName(p)}`).join('|');
 function lock() {
   if (!state.profile || !state.unlocked) return;
   state.unlocked = false;
   showGate(lockHtml());
+  // Puede haber farmacéuticos nuevos o dados de baja (por ejemplo, al sincronizar).
+  const before = lockKey();
+  loadPharmacists().then(() => {
+    const form = $('#gate form[data-form="unlock"]');
+    if (!state.unlocked && lockKey() !== before && (!form || !str(form.pin.value))) showGate(lockHtml());
+  }).catch(() => {});
 }
-async function unlockDone() {
+async function unlockDone(changedUser = false) {
   state.unlocked = true;
   state.lastTouch = Date.now();
   const gate = $('#gate');
@@ -684,6 +752,7 @@ async function unlockDone() {
     await route();
   } else {
     $('#shell').inert = false;
+    if (changedUser) await route();   // los formularios abiertos se rellenan con la firma de quien entra
   }
   logOnly('inicio_sesion', state.profile.name).catch(() => {});
   for (const task of AFTER_UNLOCK) {
@@ -711,8 +780,10 @@ async function boot() {
       state.deviceId = newId();
       await metaSet('deviceId', state.deviceId);
     }
-    state.profile = await metaGet('profile');
     await loadSettings();
+    await migrateLegacyProfile();
+    await loadPharmacists();
+    state.lastPharmacist = await metaGet('lastPharmacist');
     for (const hook of BOOT_HOOKS) {
       try { await hook(); } catch (err) { console.error(err); }
     }
@@ -730,7 +801,7 @@ async function boot() {
   setupLockTimers();
   if (!PREVIEW) registerServiceWorker();
   app.innerHTML = '';
-  showGate(state.profile ? lockHtml() : setupHtml());
+  showGate((await getAll('pharmacist')).length ? lockHtml() : setupHtml());
 }
 
 // ------------------------------------------------------------------ actualizaciones (service worker)
@@ -839,7 +910,7 @@ async function renderRoute() {
   view.dataset.view = sec || 'inicio';
   view.dataset.depth = (!arg || arg === 'archivo') ? 'root' : (extra === 'editar' || ['nueva', 'nuevo'].includes(arg)) ? 'form' : 'detail';
   $('#title').textContent = info.title;
-  const sub = Boolean(arg) || ['ajustes', 'auditoria', 'papelera', 'conservacion', 'sincronizacion', 'calculadora', 'valoracion', 'etiqueta', 'registromp', 'indicemp', 'registroac', 'registrotemp', 'registrobal', 'etiquetaestado'].includes(sec);
+  const sub = Boolean(arg) || ['ajustes', 'auditoria', 'papelera', 'conservacion', 'sincronizacion', 'calculadora', 'valoracion', 'etiqueta', 'registromp', 'indicemp', 'farmaceuticos', 'registroac', 'registrotemp', 'registrobal', 'etiquetaestado'].includes(sec);
   $('#backBtn').hidden = !sub;
   $('#mark').hidden = sub;
   $$('.tabbar a').forEach((a, i) => {
@@ -1060,14 +1131,11 @@ async function viewSettings() {
     </div></section>
     <button class="btn block" type="submit">Guardar ajustes</button>
   </form>
-  <section><h2>Seguridad</h2><form class="panel form" data-form="changePin" novalidate autocomplete="off">
-      ${formMsg()}
-      ${field('PIN actual', '<input class="pin" type="password" name="current" inputmode="numeric" pattern="[0-9]*" maxlength="8">')}
-      ${field('PIN nuevo', '<input class="pin" type="password" name="pin" inputmode="numeric" pattern="[0-9]*" maxlength="8">')}
-      ${field('Repite el PIN nuevo', '<input class="pin" type="password" name="pin2" inputmode="numeric" pattern="[0-9]*" maxlength="8">')}
-      <button class="btn secondary" type="submit">Cambiar PIN</button>
-      <p class="hint">La app se bloquea sola tras 5 minutos en segundo plano o 15 sin usarla. El PIN impide el acceso desde la app, pero los datos no están cifrados: protege también el teléfono con su propio bloqueo.</p>
-    </form></section>
+  <section><h2>Farmacéuticos y seguridad</h2><ul class="list">
+      <li><a class="row" href="#farmaceuticos--${esc(state.profile.uuid)}"><span class="row-main"><strong>Mi ficha y mi PIN</strong><span class="sub"><span>Firmas como ${esc(state.profile.name)}</span></span></span></a></li>
+      <li><a class="row" href="#farmaceuticos"><span class="row-main">Farmacéuticos (${state.pharmacists.length})${isAdmin() ? ': añadir, dar de baja, asignar PIN' : ''}</span></a></li>
+    </ul>
+    <p class="hint">Cada farmacéutico entra con su PIN y los registros quedan firmados con su nombre, apellidos y nº de colegiado. Para cambiar de farmacéutico, bloquea la app (candado de arriba). Se bloquea sola tras 5 minutos en segundo plano o 15 sin usarla. El PIN impide el acceso desde la app, pero los datos no están cifrados: protege también el equipo con su propio bloqueo.</p></section>
   <section><h2>Almacenamiento</h2><div class="panel stack">
       <p>${persisted === true ? 'Datos protegidos: Chrome no los borrará para liberar espacio.' : 'Datos sin protección permanente: si el teléfono se queda sin espacio, Chrome podría borrarlos.'} ${usage}</p>
       ${persisted === true ? '' : '<button class="btn secondary" data-act="persist">Proteger datos</button><p class="hint">Si Chrome no lo permite, instala primero la app en la pantalla de inicio y vuelve a intentarlo.</p>'}
@@ -1076,7 +1144,7 @@ async function viewSettings() {
   <section><h2>Actividad</h2><ul class="list"><li><a class="row" href="#auditoria"><span class="row-main">Ver el registro de actividad</span></a></li><li><a class="row" href="#papelera"><span class="row-main">Papelera: fórmulas, PNT, elaboraciones y entradas del índice</span></a></li><li><a class="row" href="#conservacion"><span class="row-main">Conservación: borrados programados</span></a></li></ul></section>
   <section><h2>Acerca de</h2><div class="panel"><dl class="facts">
       <dt>Versión</dt><dd>FARMA·LAB móvil ${APP_VERSION}</dd>
-      <dt>Usuario</dt><dd>${esc(state.profile.name)}</dd>
+      <dt>Sesión</dt><dd>${esc(state.profile.name)}</dd>
       <dt>Dispositivo</dt><dd><code>${esc(String(state.deviceId).slice(0, 8))}</code></dd>
     </dl><p class="hint">Prototipo de desarrollo. No validado para uso farmacéutico real ni como libro oficial de registro.</p></div></section>
   <section><h2>Borrar todos los datos</h2><div class="panel stack danger">
@@ -1183,6 +1251,7 @@ function validRecord(store, r) {
     case 'balance': return s(r.name) && optNum(r.max_g) && optNum(r.interval_days);
     case 'balance_check': return ID_RE.test(String(r.balance_uuid)) && ['interna', 'externa'].includes(r.kind) && isDay(r.date);
     case 'substance': return s(r.name) && Number.isInteger(r.number) && r.number > 0;
+    case 'pharmacist': return s(r.first_name) && s(r.pin_hash) && s(r.pin_salt) && Number.isInteger(r.pin_iterations);
     case 'audit': return s(r.action);
     default: return false;
   }
@@ -1359,7 +1428,7 @@ async function applyMerge(plan) {
 async function wipeAll() {
   const confirmed = await ask({
     title: 'Borrar todos los datos',
-    message: 'Se borrarán de este teléfono todos los registros, el PIN y la configuración de FARMA·LAB. No se puede deshacer.',
+    message: 'Se borrarán de este equipo todos los registros, los farmacéuticos con sus PIN y la configuración de FARMA·LAB. No se puede deshacer.',
     confirmLabel: 'Borrar todo', danger: true, typed: 'BORRAR',
   });
   if (!confirmed) { toast('No se ha borrado nada.'); return; }
@@ -1496,9 +1565,19 @@ const ACTIONS = {
     }
   },
   forgotPin: async () => {
+    const who = ($('#gate [name="who"]:checked') || $('#gate [name="who"][type="hidden"]') || {}).value;
+    const admins = state.pharmacists.filter((p) => p.admin && p.uuid !== who);
+    if (admins.length) {
+      await ask({
+        title: 'PIN olvidado',
+        message: `El PIN no se puede recuperar, pero ${admins.length === 1 ? fullName(admins[0]) : `quien gestiona farmacéuticos (${admins.map(fullName).join(', ')})`} puede asignarte uno nuevo: que entre con su PIN y vaya a Ajustes → Farmacéuticos.`,
+        confirmLabel: 'Entendido', cancelLabel: 'Cerrar',
+      });
+      return;
+    }
     const go = await ask({
       title: 'PIN olvidado',
-      message: 'El PIN no se puede recuperar. La única opción es borrar todos los datos de este teléfono y empezar de nuevo; después podrás importar una copia si la tienes.',
+      message: 'El PIN no se puede recuperar y no hay otro farmacéutico que pueda asignarte uno nuevo. La única opción es borrar todos los datos de este equipo y empezar de nuevo; después podrás importar una copia si la tienes.',
       confirmLabel: 'Continuar', danger: true,
     });
     if (go) await wipeAll();
@@ -1523,28 +1602,26 @@ const lines = (v) => String(v ?? '').split('\n').map((x) => x.trim()).filter(Boo
 const FORMS = {
   async setup(form) {
     const d = formData(form);
-    const name = str(d.name);
-    if (!name) throw new InputError('Escribe tu nombre.');
+    if ((await getAll('pharmacist')).length) throw new InputError('Este equipo ya está configurado. Recarga la página.');
+    const r = readPharmacist(d);
     checkPinFormat(d.pin);
     if (d.pin !== d.pin2) throw new InputError('Los dos PIN no coinciden.');
-    const salt = b64e(crypto.getRandomValues(new Uint8Array(16)));
-    const profile = {
-      uuid: newId(), name: name.slice(0, 80), role: 'responsable',
-      pin_salt: salt, pin_iterations: PBKDF2_ITERATIONS, pin_hash: await hashPin(d.pin, salt, PBKDF2_ITERATIONS),
-      created_at: nowIso(),
-    };
-    await metaSet('profile', profile);
-    state.profile = profile;
+    const rec = { uuid: newId(), ...r, admin: true, active: true, ...(await pinFields(d.pin)) };
+    state.profile = asProfile(rec);
+    await save('pharmacist', rec, 'alta_farmaceutico', signatureOf(rec));
+    await metaSet('lastPharmacist', rec.uuid);
+    await loadPharmacists();
     if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
     await unlockDone();
   },
 
   async unlock(form) {
-    const p = state.profile;
     const fails = (await metaGet('pinFailures')) || { count: 0, until: 0 };
     if (fails.until > Date.now()) throw new InputError(`Demasiados intentos. Espera ${Math.ceil((fails.until - Date.now()) / 1000)} segundos.`);
-    const ok = (await hashPin(form.pin.value, p.pin_salt, p.pin_iterations)) === p.pin_hash;
-    if (!ok) {
+    const who = (form.querySelector('[name="who"]:checked') || form.querySelector('[name="who"][type="hidden"]') || {}).value;
+    const p = who ? await getOne('pharmacist', who) : null;
+    if (!p || p.active === false) throw new InputError('Elige quién eres.');
+    if (!(await pinMatches(p, form.pin.value))) {
       fails.count += 1;
       if (fails.count >= 5) fails.until = Date.now() + Math.min(30000 * 2 ** (fails.count - 5), 15 * 60000);
       await metaSet('pinFailures', fails);
@@ -1552,22 +1629,11 @@ const FORMS = {
       throw new InputError(fails.count >= 5 ? `PIN incorrecto. Espera ${Math.ceil((fails.until - Date.now()) / 1000)} segundos antes de reintentar.` : 'PIN incorrecto.');
     }
     await metaSet('pinFailures', { count: 0, until: 0 });
-    await unlockDone();
-  },
-
-  async changePin(form) {
-    const d = formData(form);
-    const p = state.profile;
-    if ((await hashPin(d.current || '', p.pin_salt, p.pin_iterations)) !== p.pin_hash) throw new InputError('El PIN actual no es correcto.');
-    checkPinFormat(d.pin);
-    if (d.pin !== d.pin2) throw new InputError('Los dos PIN nuevos no coinciden.');
-    const salt = b64e(crypto.getRandomValues(new Uint8Array(16)));
-    const profile = { ...p, pin_salt: salt, pin_iterations: PBKDF2_ITERATIONS, pin_hash: await hashPin(d.pin, salt, PBKDF2_ITERATIONS) };
-    await metaSet('profile', profile);
-    state.profile = profile;
-    await logOnly('cambio_pin', profile.name);
-    form.reset();
-    toast('PIN cambiado.');
+    const changed = !state.profile || state.profile.uuid !== p.uuid;
+    state.profile = asProfile(p);
+    state.lastPharmacist = p.uuid;
+    await metaSet('lastPharmacist', p.uuid);
+    await unlockDone(changed);
   },
 
   async settings(form) {

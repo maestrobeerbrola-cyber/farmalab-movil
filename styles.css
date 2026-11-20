@@ -559,3 +559,11 @@ li.bad strong { color: var(--red); }
 .subbox > .msg { margin: 0; }
 .subbox > .grid2 { margin-top: 12px; }
 .subpending { margin-bottom: 14px; }
+
+/* Pantalla de entrada con varios farmacéuticos */
+.gate .who { border: 0; padding: 0; margin: 0; display: grid; gap: 8px; min-width: 0; }
+.gate .who legend { padding: 0; margin-bottom: 8px; color: #c6d4e0; font-weight: 600; }
+.gate .who-opt { display: flex; align-items: center; gap: 12px; min-height: 48px; padding: 8px 14px; border-radius: 10px; background: rgba(255, 255, 255, .08); color: #fff; cursor: pointer; }
+.gate .who-opt:has(input:checked) { background: #3ccf92; color: #072619; font-weight: 600; }
+.gate .who-opt input { flex: none; width: 20px; height: 20px; margin: 0; accent-color: #072619; }
+.gate .grid2 { gap: 12px; }

@@ -147,7 +147,7 @@ async function buildRecordSheetPdf(p, d, s, draftMissing) {
     { h: 36, cells: [
       { from: 0, to: 0.5, value: p.decision === 'aceptada' ? 'Aceptado' : p.decision === 'rechazada' ? 'Rechazado' : '' },
       { from: 0.5, to: 0.68, value: decided ? fmtDay(p.decision_date) : '' },
-      { from: 0.68, to: 1, value: decided ? (s.pharmacy.pharmacist || p.decision_by || '') : '' },
+      { from: 0.68, to: 1, value: decided ? (p.decision_by || s.pharmacy.pharmacist || '') : '' },
     ] },
   ], { gap: 4, keep: true });
   return sh.finish();
