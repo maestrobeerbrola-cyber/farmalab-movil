@@ -4,7 +4,8 @@
 /*
  * Cada farmacéutico entra con su PIN y firma los registros con signatureOf(): nombre, dos apellidos y nº de colegiado.
  * Quien «gestiona farmacéuticos» (admin) puede añadir fichas, darlas de baja y asignar un PIN nuevo a quien lo olvide.
- * Las fichas no se borran (las firmas de los registros las mencionan): se dan de baja y dejan de poder entrar.
+ * Una ficha se puede dar de baja (no entra, pero sigue en la lista) o eliminar definitivamente (fichas repetidas o
+ * creadas por error): desaparece de los dos equipos (tombstone). Las firmas ya hechas son texto y se conservan.
  * Viajan con las copias y la sincronización, así que cada uno entra con el mismo PIN en el móvil y en el PC.
  */
 ROUTES.farmaceuticos = (arg, extra) => (arg === 'nuevo' ? viewPharmacistForm(null)
@@ -16,16 +17,33 @@ const missingOf = (p) => [!str(p.last_name1) && 'los apellidos', !str(p.colegiad
 /** «Faltan los apellidos y el nº de colegiado» / «Falta el nº de colegiado». */
 const missingText = (miss) => `${miss.length > 1 || miss[0] === 'los apellidos' ? 'Faltan' : 'Falta'} ${miss.join(' y ')}`;
 const activeAdmins = (all) => all.filter((p) => p.admin && p.active !== false);
+/** Claves para encontrar fichas repetidas: el nombre completo y el nº de colegiado. */
+const dupKeys = (p) => [`n:${fold(fullName(splitLegacyName(p)))}`, colegiadoKey(p.colegiado) && `c:${colegiadoKey(p.colegiado)}`].filter(Boolean);
+/** Grupos de fichas activas repetidas (mismo nombre o mismo nº de colegiado). */
+function duplicateGroups(all) {
+  const seen = new Map();
+  all.filter((p) => p.active !== false).forEach((p) => dupKeys(p).forEach((k) => { if (!seen.has(k)) seen.set(k, []); seen.get(k).push(p); }));
+  const groups = [];
+  const done = new Set();
+  [...seen.values()].filter((g) => g.length > 1).forEach((g) => {
+    const key = g.map((p) => p.uuid).sort().join('|');
+    if (!done.has(key)) { done.add(key); groups.push(g); }
+  });
+  return groups;
+}
+const createdWhere = (p) => (p.device_id && p.device_id === state.deviceId ? 'en este equipo' : 'en otro equipo');
 
 async function viewPharmacists() {
   state.parent = '#ajustes';
   const all = (await getAll('pharmacist')).sort((a, b) => (a.active === false) - (b.active === false) || fullName(a).localeCompare(fullName(b), 'es'));
   const me = state.profile.uuid;
+  const dups = new Set(duplicateGroups(all).flat().map((p) => p.uuid));
   const row = (p) => {
     const miss = missingOf(p);
-    return `<li><a class="row" href="#farmaceuticos--${esc(p.uuid)}"><div class="row-main"><strong>${esc(fullName(p))}</strong><span class="sub">${str(p.colegiado) ? `<span>Nº col. ${esc(p.colegiado)}</span>` : ''}${miss.length ? `<span class="warn">${esc(missingText(miss))}</span>` : ''}${p.uuid === me ? '<span>Tú</span>' : ''}${p.admin ? '<span>Gestiona farmacéuticos</span>' : ''}</span></div>${p.active === false ? '<span class="pill gray">De baja</span>' : ''}</a></li>`;
+    return `<li><a class="row" href="#farmaceuticos--${esc(p.uuid)}"><div class="row-main"><strong>${esc(fullName(p))}</strong><span class="sub">${str(p.colegiado) ? `<span>Nº col. ${esc(p.colegiado)}</span>` : ''}${miss.length ? `<span class="warn">${esc(missingText(miss))}</span>` : ''}${p.uuid === me ? '<span>Tú</span>' : ''}${p.admin ? '<span>Gestiona farmacéuticos</span>' : ''}${dups.has(p.uuid) ? `<span>Creada ${createdWhere(p)}${isDay(String(p.created_at || '').slice(0, 10)) ? ` el ${fmtDay(String(p.created_at).slice(0, 10))}` : ''}</span>` : ''}</span></div>${p.active === false ? '<span class="pill gray">De baja</span>' : dups.has(p.uuid) ? '<span class="pill amber">Repetida</span>' : ''}</a></li>`;
   };
   return `<p class="hint intro">Cada farmacéutico entra con su PIN y los registros quedan firmados con su nombre, apellidos y nº de colegiado.</p>
+    ${dups.size ? `<p class="msg warn">Hay fichas repetidas (de otro equipo o creadas dos veces). ${isAdmin() ? 'Abre la que sobre y elimínala: esa persona entrará después con el PIN de la que queda.' : 'Quien gestiona farmacéuticos puede eliminar la que sobre.'}</p>` : ''}
     <ul class="list">${all.map(row).join('')}</ul>
     ${isAdmin() ? fab('#farmaceuticos--nuevo', 'Añadir farmacéutico') : '<p class="hint">Solo quien gestiona farmacéuticos puede añadir más.</p>'}`;
 }
@@ -45,6 +63,7 @@ async function viewPharmacist(id) {
       ['Nº de colegiado', str(p.colegiado) ? esc(p.colegiado) : '<span class="warn">Sin nº</span>'],
       ['Firma en los registros', esc(signatureOf(p))],
       ['Gestiona farmacéuticos', p.admin ? 'Sí' : 'No'],
+      isDay(String(p.created_at || '').slice(0, 10)) ? ['Alta', `${fmtDay(String(p.created_at).slice(0, 10))}, ${createdWhere(p)}`] : null,
       p.active === false ? ['De baja desde', fmtDay(String(p.inactive_at || p.updated_at || '').slice(0, 10))] : null,
     ])}
     <div class="actions spaced">
@@ -55,6 +74,10 @@ async function viewPharmacist(id) {
   ${admin && !me ? `<section><h2>${p.active === false ? 'Volver a dar de alta' : 'Dar de baja'}</h2><div class="panel stack">
     <p class="hint">${p.active === false ? 'Podrá volver a entrar con su PIN.' : 'No podrá entrar en la app. Las firmas que ya hizo se conservan en los registros.'}</p>
     <button class="btn ${p.active === false ? 'secondary' : 'danger-outline'} block" type="button" data-act="pharmacistActive" data-id="${esc(p.uuid)}" data-on="${p.active === false ? '1' : '0'}">${p.active === false ? 'Dar de alta' : `Dar de baja a ${esc(fullName(p))}`}</button>
+  </div></section>
+  <section><h2>Eliminar la ficha</h2><div class="panel stack">
+    <p class="hint">Para fichas repetidas o creadas por error: desaparece de la lista y de la entrada en los dos equipos, y no se puede deshacer. Las firmas que ya hizo se conservan en los registros.</p>
+    <button class="btn danger block" type="button" data-act="pharmacistDelete" data-id="${esc(p.uuid)}">Eliminar definitivamente</button>
   </div></section>` : ''}`;
 }
 
@@ -156,6 +179,34 @@ Object.assign(FORMS, {
 });
 
 Object.assign(ACTIONS, {
+  pharmacistDelete: async (el) => {
+    if (!isAdmin()) return;
+    const p = await getOne('pharmacist', el.dataset.id);
+    if (!p || p.uuid === state.profile.uuid) return;
+    const all = await getAll('pharmacist');
+    if (p.admin && p.active !== false && activeAdmins(all).filter((x) => x.uuid !== p.uuid).length === 0) {
+      await ask({ title: 'No se puede eliminar', message: 'Tiene que quedar al menos un farmacéutico que gestione farmacéuticos.', confirmLabel: 'Entendido', cancelLabel: 'Cerrar' });
+      return;
+    }
+    const twin = all.find((x) => x.uuid !== p.uuid && x.active !== false && dupKeys(x).some((k) => dupKeys(p).includes(k)));
+    const ok = await ask({
+      title: 'Eliminar la ficha',
+      message: `La ficha de ${signatureOf(p)} se borrará para siempre, también del otro equipo al sincronizar. Las firmas que ya hizo se conservan en los registros.${twin ? `\n\nEs una ficha repetida de ${fullName(twin)}: a partir de ahora, esa persona entra en los dos equipos con el PIN de la ficha que queda.` : ''}\n\nNo se puede deshacer.`,
+      confirmLabel: 'Eliminar', danger: true,
+    });
+    if (!ok) return;
+    const stamp = nowIso();
+    await tx(['pharmacist', 'audit', 'meta'], 'readwrite', (t) => {
+      t.objectStore('pharmacist').delete(p.uuid);
+      addTombstones(t, [{ store: 'pharmacist', uuid: p.uuid }], stamp);   // para que no vuelva desde el otro equipo ni con una copia
+      t.objectStore('audit').put(auditEntry('borrado_farmaceutico', signatureOf(p), stamp));
+      t.objectStore('meta').put(stamp, 'lastChange');
+    });
+    AFTER_SAVE.forEach((fn) => { try { fn(); } catch (err) { console.error(err); } });   // p. ej., enviarlo al otro equipo
+    await loadPharmacists();
+    toast(`Ficha de ${fullName(p)} eliminada.`);
+    location.hash = '#farmaceuticos';
+  },
   pharmacistActive: async (el) => {
     if (!isAdmin()) return;
     const p = await getOne('pharmacist', el.dataset.id);
@@ -189,15 +240,9 @@ ALERT_SOURCES.push(async () => {
     text: 'Complétala para que tus firmas en los registros lleven nombre, apellidos y nº de colegiado.',
     href: `#farmaceuticos--${state.profile.uuid}--editar`,
   });
-  const seen = new Map();
-  (await getAll('pharmacist')).filter((p) => p.active !== false).forEach((p) => {
-    const k = fold(fullName(splitLegacyName(p)));
-    if (!seen.has(k)) seen.set(k, []);
-    seen.get(k).push(p);
-  });
-  [...seen.values()].filter((g) => g.length > 1).forEach((g) => out.push({
+  duplicateGroups(await getAll('pharmacist')).forEach((g) => out.push({
     tone: 'amber', kind: 'Ficha de farmacéutico repetida', title: fullName(g[0]),
-    text: 'Puede venir de otro equipo (antes cada uno tenía su propio usuario). Quien gestiona farmacéuticos debe dar de baja la que sobre; esa persona entrará después con el PIN de la que queda.',
+    text: 'Puede venir de otro equipo o haberse creado dos veces. Quien gestiona farmacéuticos debe eliminar la que sobre (Ajustes → Farmacéuticos); esa persona entrará después con el PIN de la que queda.',
     href: '#farmaceuticos',
   }));
   return out;
@@ -209,4 +254,5 @@ Object.assign(ACTION_LABELS, {
   pin_asignado: 'PIN nuevo asignado a un farmacéutico',
   baja_farmaceutico: 'Baja de farmacéutico',
   alta_farmaceutico_de_nuevo: 'Farmacéutico dado de alta de nuevo',
+  borrado_farmaceutico: 'Ficha de farmacéutico eliminada definitivamente',
 });

@@ -1,4 +1,4 @@
-# FARMA·LAB móvil v0.3.32 (prototipo)
+# FARMA·LAB móvil v0.3.33 (prototipo)
 
 App que se instala desde Chrome o Edge (Android y Windows) y funciona sin conexión. Los datos se guardan **en el propio dispositivo** y, si se configura, se sincronizan entre el móvil y el PC a través de Google Drive.
 
@@ -14,6 +14,10 @@ App que se instala desde Chrome o Edge (Android y Windows) y funciona sin conexi
 - **Temperaturas** (PN/L/PG/009/00): lectura diaria del local y la nevera, incidencias y registro mensual en PDF.
 - **Documentos**: PNT y bibliografía con su PDF, Word o foto, que se consultan dentro de la app, también sin conexión.
 - Registro de actividad, bloqueo con PIN, exportar e importar copias.
+
+## Novedades de la v0.3.33
+- **Eliminar fichas de farmacéutico definitivamente.** En la ficha de otro farmacéutico, quien gestiona farmacéuticos tiene «Eliminar definitivamente»: desaparece de la lista y de la pantalla de entrada en los dos equipos (no vuelve al sincronizar ni con una copia antigua). Las firmas que ya hizo se conservan en los registros. Dar de baja sigue existiendo para quien deja la farmacia.
+- Las fichas repetidas (mismo nombre o mismo nº de colegiado) se marcan como «Repetida» en la lista, con cuándo y en qué equipo se crearon, para saber cuál eliminar. No se puede eliminar la propia ni el último que gestiona farmacéuticos.
 
 ## Novedades de la v0.3.32
 - **Varios farmacéuticos, cada uno con su PIN.** Al entrar se elige quién eres y se escribe tu PIN. Cada ficha lleva nombre, dos apellidos y nº de colegiado, y todo lo que se registra (recepciones, decisiones, elaboraciones, temperaturas, calibraciones, actividad…) queda firmado así: «Ana García López (nº col. 282812345)».
