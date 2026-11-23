@@ -6,7 +6,7 @@
  * sincronizarlo más adelante con la versión de PC.
  */
 
-const APP_VERSION = '0.3.33';
+const APP_VERSION = '0.3.34';
 const PREVIEW = document.documentElement.dataset.preview === '1'; // copia de prueba publicada en Claude
 const DB_NAME = 'farmalab-movil';
 const EXPORT_FORMAT = 'farmalab-datos';
@@ -908,7 +908,7 @@ async function renderRoute() {
   view.innerHTML = html;
   // Para el diseño de pantalla ancha: qué apartado es y si es la lista, una ficha o un formulario.
   view.dataset.view = sec || 'inicio';
-  view.dataset.depth = (!arg || arg === 'archivo') ? 'root' : (extra === 'editar' || ['nueva', 'nuevo'].includes(arg)) ? 'form' : 'detail';
+  view.dataset.depth = (!arg || ['archivo', 'dispensadas'].includes(arg)) ? 'root' : (extra === 'editar' || ['nueva', 'nuevo'].includes(arg)) ? 'form' : 'detail';
   $('#title').textContent = info.title;
   const sub = Boolean(arg) || ['ajustes', 'auditoria', 'papelera', 'conservacion', 'sincronizacion', 'calculadora', 'valoracion', 'etiqueta', 'registromp', 'indicemp', 'farmaceuticos', 'registroac', 'registrotemp', 'registrobal', 'etiquetaestado'].includes(sec);
   $('#backBtn').hidden = !sub;

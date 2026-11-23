@@ -567,3 +567,6 @@ li.bad strong { color: var(--red); }
 .gate .who-opt:has(input:checked) { background: #3ccf92; color: #072619; font-weight: 600; }
 .gate .who-opt input { flex: none; width: 20px; height: 20px; margin: 0; accent-color: #072619; }
 .gate .grid2 { gap: 12px; }
+
+/* Elaborar: aviso de dispensadas pendientes encima del botón «Dispensadas» */
+.msg.disp-pending { margin: 14px 0 12px; }

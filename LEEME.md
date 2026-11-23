@@ -1,4 +1,4 @@
-# FARMA·LAB móvil v0.3.33 (prototipo)
+# FARMA·LAB móvil v0.3.34 (prototipo)
 
 App que se instala desde Chrome o Edge (Android y Windows) y funciona sin conexión. Los datos se guardan **en el propio dispositivo** y, si se configura, se sincronizan entre el móvil y el PC a través de Google Drive.
 
@@ -14,6 +14,10 @@ App que se instala desde Chrome o Edge (Android y Windows) y funciona sin conexi
 - **Temperaturas** (PN/L/PG/009/00): lectura diaria del local y la nevera, incidencias y registro mensual en PDF.
 - **Documentos**: PNT y bibliografía con su PDF, Word o foto, que se consultan dentro de la app, también sin conexión.
 - Registro de actividad, bloqueo con PIN, exportar e importar copias.
+
+## Novedades de la v0.3.34
+- **Fórmulas dispensadas aparte.** Al marcar una elaboración como dispensada, sale de la lista de Elaborar y se guarda en **«Dispensadas»** (botón bajo la lista), de la más reciente a la más antigua, con su fecha de dispensación y nº de libro recetario, y con buscador. Conserva su guía, su etiqueta y su ficha de registro en PDF; desde su ficha, «atrás» vuelve a «Dispensadas».
+- Si alguna dispensada tiene datos pendientes, la lista de Elaborar lo avisa con un enlace.
 
 ## Novedades de la v0.3.33
 - **Eliminar fichas de farmacéutico definitivamente.** En la ficha de otro farmacéutico, quien gestiona farmacéuticos tiene «Eliminar definitivamente»: desaparece de la lista y de la pantalla de entrada en los dos equipos (no vuelve al sincronizar ni con una copia antigua). Las firmas que ya hizo se conservan en los registros. Dar de baja sigue existiendo para quien deja la farmacia.

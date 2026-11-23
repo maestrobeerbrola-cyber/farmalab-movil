@@ -1,7 +1,7 @@
 'use strict';
 /* FARMA·LAB móvil · Elaborar: guía de elaboración (RD 175/2001), estados, lote, consumo de stock y etiquetas. */
 
-ROUTES.elaboraciones = (arg, extra) => (arg === 'nueva' ? viewProductionNew(extra) : arg ? viewProduction(arg) : viewProductions());
+ROUTES.elaboraciones = (arg, extra) => (arg === 'nueva' ? viewProductionNew(extra) : arg === 'dispensadas' ? viewDispensed() : arg ? viewProduction(arg) : viewProductions());
 ROUTES.etiqueta = (arg) => viewLabel(arg);
 
 const makeLot = (settings, n, ymd) => {
@@ -43,17 +43,39 @@ const staleDays = (p) => (p.status === 'en_proceso' ? Math.floor((Date.now() - D
 
 // ------------------------------------------------------------------ lista y alta
 const STATUS_ORDER = { en_proceso: 0, elaborada: 1, dispensada: 2, rechazada: 3 };
+/*
+ * La lista de Elaborar muestra el trabajo abierto (en proceso, elaboradas pendientes de dispensar y rechazadas).
+ * Al dispensarse, la elaboración pasa a «Dispensadas» (#elaboraciones--dispensadas), con su ficha, etiqueta y registro.
+ */
+const prodWarn = (p) => (['elaborada', 'dispensada'].includes(p.status) && pendingItems(p).length > 0) || staleDays(p) >= STALE_PRODUCTION_DAYS;
+const prodText = (p) => lc([p.lot, p.record_code, p.formula_name, p.recetario_no, STATUS.production[p.status], p.dispensed_date && fmtDay(p.dispensed_date)].join(' '));
 async function viewProductions() {
   const all = await getAll('production');
-  const items = all.filter((p) => !p.deleted_at).sort((a, b) => (STATUS_ORDER[a.status] - STATUS_ORDER[b.status]) || String(b.created_at).localeCompare(String(a.created_at)));
-  const trashed = all.length - items.length;
+  const live = all.filter((p) => !p.deleted_at);
+  const items = live.filter((p) => p.status !== 'dispensada').sort((a, b) => (STATUS_ORDER[a.status] - STATUS_ORDER[b.status]) || String(b.created_at).localeCompare(String(a.created_at)));
+  const dispensed = live.filter((p) => p.status === 'dispensada');
+  const dispPending = dispensed.filter(prodWarn).length;
+  const trashed = all.length - live.length;
   const list = items.length
-    ? `<ul class="list" data-list>${items.map((p) => {
-      const warn = (['elaborada', 'dispensada'].includes(p.status) && pendingItems(p).length) || staleDays(p) >= STALE_PRODUCTION_DAYS;
-      return `<li data-text="${esc(lc([p.lot, p.record_code, p.formula_name, p.recetario_no, STATUS.production[p.status]].join(' ')))}"><a class="row" href="#elaboraciones--${esc(p.uuid)}"><div class="row-main"><strong>${esc(p.lot || p.record_code)}</strong><span class="sub"><span>${esc(p.formula_name)}</span><span>${fmtNum(p.target_amount)} ${esc(p.unit)}</span><span>${esc(fmtStamp(p.created_at).slice(0, 10))}</span>${warn ? '<span class="warn">Pendiente</span>' : ''}</span></div>${pill('production', p.status)}</a></li>`;
-    }).join('')}</ul><p class="none" data-none hidden>Ninguna elaboración coincide con la búsqueda.</p>`
-    : empty('Aún no hay elaboraciones.', 'Crea una con «Nueva elaboración» a partir de una fórmula aprobada.');
-  return `${items.length ? searchBox('Buscar lote, fórmula o nº de recetario') : ''}${list}${trashed ? `<p class="more"><a href="#papelera">Eliminadas (${trashed})</a></p>` : ''}${fab('#elaboraciones--nueva', 'Nueva elaboración')}`;
+    ? `<ul class="list" data-list>${items.map((p) => `<li data-text="${esc(prodText(p))}"><a class="row" href="#elaboraciones--${esc(p.uuid)}"><div class="row-main"><strong>${esc(p.lot || p.record_code)}</strong><span class="sub"><span>${esc(p.formula_name)}</span><span>${fmtNum(p.target_amount)} ${esc(p.unit)}</span><span>${esc(fmtStamp(p.created_at).slice(0, 10))}</span>${prodWarn(p) ? '<span class="warn">Pendiente</span>' : ''}</span></div>${pill('production', p.status)}</a></li>`).join('')}</ul><p class="none" data-none hidden>Ninguna elaboración coincide con la búsqueda.</p>`
+    : dispensed.length
+      ? empty('No hay elaboraciones abiertas.', 'Las ya dispensadas están en «Dispensadas».')
+      : empty('Aún no hay elaboraciones.', 'Crea una con «Nueva elaboración» a partir de una fórmula aprobada.');
+  return `${items.length ? searchBox('Buscar lote, fórmula o nº de recetario') : ''}${list}
+    ${dispPending ? `<p class="msg warn disp-pending">${dispPending === 1 ? 'Una fórmula dispensada tiene' : `${dispPending} fórmulas dispensadas tienen`} datos pendientes. <a href="#elaboraciones--dispensadas">Ver dispensadas</a></p>` : ''}
+    ${dispensed.length ? `<p><a class="btn secondary block" href="#elaboraciones--dispensadas">${ICON.archive}Dispensadas (${dispensed.length})</a></p>` : ''}
+    ${trashed ? `<p class="more"><a href="#papelera">Eliminadas (${trashed})</a></p>` : ''}${fab('#elaboraciones--nueva', 'Nueva elaboración')}`;
+}
+
+async function viewDispensed() {
+  state.parent = '#elaboraciones';
+  const items = (await getAll('production')).filter((p) => !p.deleted_at && p.status === 'dispensada')
+    .sort((a, b) => (prodWarn(b) - prodWarn(a)) || String(b.dispensed_date || '').localeCompare(String(a.dispensed_date || '')) || String(b.created_at).localeCompare(String(a.created_at)));
+  const list = items.length
+    ? `<ul class="list" data-list>${items.map((p) => `<li data-text="${esc(prodText(p))}"><a class="row" href="#elaboraciones--${esc(p.uuid)}"><div class="row-main"><strong>${esc(p.lot || p.record_code)}</strong><span class="sub"><span>${esc(p.formula_name)}</span><span>${fmtNum(p.dispensed_qty ?? p.target_amount)} ${esc(p.unit)}</span>${isDay(p.dispensed_date) ? `<span>Dispensada el ${fmtDay(p.dispensed_date)}</span>` : ''}${p.recetario_no ? `<span>Libro recetario nº ${esc(p.recetario_no)}</span>` : ''}${prodWarn(p) ? '<span class="warn">Pendiente</span>' : ''}</span></div></a></li>`).join('')}</ul><p class="none" data-none hidden>Ninguna fórmula dispensada coincide con la búsqueda.</p>`
+    : empty('Aún no hay fórmulas dispensadas.', 'Al marcar una elaboración como dispensada, sale de la lista de Elaborar y se guarda aquí.');
+  return `<h2>Dispensadas</h2><p class="hint intro">Fórmulas ya dispensadas, de la más reciente a la más antigua. No salen en la lista de Elaborar, pero conservan su guía, su etiqueta y su ficha de registro en PDF.</p>
+    ${items.length ? searchBox('Buscar lote, fórmula, recetario o fecha') : ''}${list}`;
 }
 
 async function suggestRecordCode() {
@@ -202,6 +224,7 @@ function qcRow(t = {}) {
 async function viewProduction(id) {
   const p = await getOne('production', id);
   if (!p) return empty('Este registro no existe.', '');
+  if (p.status === 'dispensada' && !p.deleted_at) state.parent = '#elaboraciones--dispensadas';
   if (p.deleted_at) {
     return `${deletedBanner('production', p)}<div class="panel">
       <div class="head-row"><h2 class="big">${esc(p.record_code)}</h2>${pill('production', p.status)}</div>
@@ -622,7 +645,7 @@ Object.assign(FORMS, {
       rec.status = 'dispensada';
       rec.status_changed_at = nowIso();
       await saveMany([['production', rec], ...packEntries], 'marcar_dispensada', `${rec.lot}: libro recetario nº ${rec.recetario_no}`, packAudit);
-      toast('Dispensada.');
+      toast('Dispensada. Se guarda en «Dispensadas» y sale de la lista de Elaborar.');
       await route();
       return;
     }
