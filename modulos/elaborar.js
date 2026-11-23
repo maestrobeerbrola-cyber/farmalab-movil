@@ -1,7 +1,7 @@
 'use strict';
 /* FARMA·LAB móvil · Elaborar: guía de elaboración (RD 175/2001), estados, lote, consumo de stock y etiquetas. */
 
-ROUTES.elaboraciones = (arg, extra) => (arg === 'nueva' ? viewProductionNew(extra) : arg === 'dispensadas' ? viewDispensed() : arg ? viewProduction(arg) : viewProductions());
+ROUTES.elaboraciones = (arg, extra) => (arg === 'nueva' ? viewProductionNew(extra) : arg === 'dispensadas' ? viewClosed('dispensada') : arg === 'rechazadas' ? viewClosed('rechazada') : arg ? viewProduction(arg) : viewProductions());
 ROUTES.etiqueta = (arg) => viewLabel(arg);
 
 const makeLot = (settings, n, ymd) => {
@@ -44,37 +44,55 @@ const staleDays = (p) => (p.status === 'en_proceso' ? Math.floor((Date.now() - D
 // ------------------------------------------------------------------ lista y alta
 const STATUS_ORDER = { en_proceso: 0, elaborada: 1, dispensada: 2, rechazada: 3 };
 /*
- * La lista de Elaborar muestra el trabajo abierto (en proceso, elaboradas pendientes de dispensar y rechazadas).
- * Al dispensarse, la elaboración pasa a «Dispensadas» (#elaboraciones--dispensadas), con su ficha, etiqueta y registro.
+ * La lista de Elaborar muestra el trabajo abierto: en proceso y elaboradas pendientes de dispensar.
+ * Al dispensarse o rechazarse, la elaboración pasa a su apartado (#elaboraciones--dispensadas / --rechazadas),
+ * con su guía, su etiqueta (las dispensadas) y su ficha de registro.
  */
+const CLOSED = {
+  dispensada: {
+    route: 'dispensadas', title: 'Dispensadas', when: (p) => p.dispensed_date, whenLabel: 'Dispensada el',
+    qty: (p) => p.dispensed_qty ?? p.target_amount,
+    intro: 'Fórmulas ya dispensadas, de la más reciente a la más antigua. No salen en la lista de Elaborar, pero conservan su guía, su etiqueta y su ficha de registro en PDF.',
+    none: 'Ninguna fórmula dispensada coincide con la búsqueda.',
+    empty: ['Aún no hay fórmulas dispensadas.', 'Al marcar una elaboración como dispensada, sale de la lista de Elaborar y se guarda aquí.'],
+  },
+  rechazada: {
+    route: 'rechazadas', title: 'Rechazadas', when: (p) => p.decision_date || String(p.status_changed_at || '').slice(0, 10), whenLabel: 'Rechazada el',
+    qty: (p) => p.target_amount,
+    intro: 'Preparados rechazados, del más reciente al más antiguo. No se pueden dispensar ni salen en la lista de Elaborar, pero conservan su guía y su ficha de registro en PDF con la decisión de rechazo.',
+    none: 'Ningún preparado rechazado coincide con la búsqueda.',
+    empty: ['No hay preparados rechazados.', 'Al rechazar un preparado, sale de la lista de Elaborar y se guarda aquí.'],
+  },
+};
 const prodWarn = (p) => (['elaborada', 'dispensada'].includes(p.status) && pendingItems(p).length > 0) || staleDays(p) >= STALE_PRODUCTION_DAYS;
-const prodText = (p) => lc([p.lot, p.record_code, p.formula_name, p.recetario_no, STATUS.production[p.status], p.dispensed_date && fmtDay(p.dispensed_date)].join(' '));
+const prodText = (p) => lc([p.lot, p.record_code, p.formula_name, p.recetario_no, STATUS.production[p.status], p.dispensed_date && fmtDay(p.dispensed_date), CLOSED[p.status] && isDay(CLOSED[p.status].when(p)) && fmtDay(CLOSED[p.status].when(p))].join(' '));
 async function viewProductions() {
   const all = await getAll('production');
   const live = all.filter((p) => !p.deleted_at);
-  const items = live.filter((p) => p.status !== 'dispensada').sort((a, b) => (STATUS_ORDER[a.status] - STATUS_ORDER[b.status]) || String(b.created_at).localeCompare(String(a.created_at)));
-  const dispensed = live.filter((p) => p.status === 'dispensada');
-  const dispPending = dispensed.filter(prodWarn).length;
+  const items = live.filter((p) => !CLOSED[p.status]).sort((a, b) => (STATUS_ORDER[a.status] - STATUS_ORDER[b.status]) || String(b.created_at).localeCompare(String(a.created_at)));
+  const closed = Object.keys(CLOSED).map((st) => [st, live.filter((p) => p.status === st)]);
+  const dispPending = live.filter((p) => p.status === 'dispensada' && prodWarn(p)).length;
   const trashed = all.length - live.length;
   const list = items.length
     ? `<ul class="list" data-list>${items.map((p) => `<li data-text="${esc(prodText(p))}"><a class="row" href="#elaboraciones--${esc(p.uuid)}"><div class="row-main"><strong>${esc(p.lot || p.record_code)}</strong><span class="sub"><span>${esc(p.formula_name)}</span><span>${fmtNum(p.target_amount)} ${esc(p.unit)}</span><span>${esc(fmtStamp(p.created_at).slice(0, 10))}</span>${prodWarn(p) ? '<span class="warn">Pendiente</span>' : ''}</span></div>${pill('production', p.status)}</a></li>`).join('')}</ul><p class="none" data-none hidden>Ninguna elaboración coincide con la búsqueda.</p>`
-    : dispensed.length
-      ? empty('No hay elaboraciones abiertas.', 'Las ya dispensadas están en «Dispensadas».')
+    : closed.some(([, l]) => l.length)
+      ? empty('No hay elaboraciones abiertas.', 'Las dispensadas y las rechazadas están en sus apartados, debajo.')
       : empty('Aún no hay elaboraciones.', 'Crea una con «Nueva elaboración» a partir de una fórmula aprobada.');
   return `${items.length ? searchBox('Buscar lote, fórmula o nº de recetario') : ''}${list}
     ${dispPending ? `<p class="msg warn disp-pending">${dispPending === 1 ? 'Una fórmula dispensada tiene' : `${dispPending} fórmulas dispensadas tienen`} datos pendientes. <a href="#elaboraciones--dispensadas">Ver dispensadas</a></p>` : ''}
-    ${dispensed.length ? `<p><a class="btn secondary block" href="#elaboraciones--dispensadas">${ICON.archive}Dispensadas (${dispensed.length})</a></p>` : ''}
+    ${closed.filter(([, l]) => l.length).map(([st, l]) => `<p><a class="btn secondary block" href="#elaboraciones--${CLOSED[st].route}">${ICON.archive}${CLOSED[st].title} (${l.length})</a></p>`).join('')}
     ${trashed ? `<p class="more"><a href="#papelera">Eliminadas (${trashed})</a></p>` : ''}${fab('#elaboraciones--nueva', 'Nueva elaboración')}`;
 }
 
-async function viewDispensed() {
+async function viewClosed(status) {
+  const C = CLOSED[status];
   state.parent = '#elaboraciones';
-  const items = (await getAll('production')).filter((p) => !p.deleted_at && p.status === 'dispensada')
-    .sort((a, b) => (prodWarn(b) - prodWarn(a)) || String(b.dispensed_date || '').localeCompare(String(a.dispensed_date || '')) || String(b.created_at).localeCompare(String(a.created_at)));
+  const items = (await getAll('production')).filter((p) => !p.deleted_at && p.status === status)
+    .sort((a, b) => (prodWarn(b) - prodWarn(a)) || String(C.when(b) || '').localeCompare(String(C.when(a) || '')) || String(b.created_at).localeCompare(String(a.created_at)));
   const list = items.length
-    ? `<ul class="list" data-list>${items.map((p) => `<li data-text="${esc(prodText(p))}"><a class="row" href="#elaboraciones--${esc(p.uuid)}"><div class="row-main"><strong>${esc(p.lot || p.record_code)}</strong><span class="sub"><span>${esc(p.formula_name)}</span><span>${fmtNum(p.dispensed_qty ?? p.target_amount)} ${esc(p.unit)}</span>${isDay(p.dispensed_date) ? `<span>Dispensada el ${fmtDay(p.dispensed_date)}</span>` : ''}${p.recetario_no ? `<span>Libro recetario nº ${esc(p.recetario_no)}</span>` : ''}${prodWarn(p) ? '<span class="warn">Pendiente</span>' : ''}</span></div></a></li>`).join('')}</ul><p class="none" data-none hidden>Ninguna fórmula dispensada coincide con la búsqueda.</p>`
-    : empty('Aún no hay fórmulas dispensadas.', 'Al marcar una elaboración como dispensada, sale de la lista de Elaborar y se guarda aquí.');
-  return `<h2>Dispensadas</h2><p class="hint intro">Fórmulas ya dispensadas, de la más reciente a la más antigua. No salen en la lista de Elaborar, pero conservan su guía, su etiqueta y su ficha de registro en PDF.</p>
+    ? `<ul class="list" data-list>${items.map((p) => `<li data-text="${esc(prodText(p))}"><a class="row" href="#elaboraciones--${esc(p.uuid)}"><div class="row-main"><strong>${esc(p.lot || p.record_code)}</strong><span class="sub"><span>${esc(p.formula_name)}</span><span>${fmtNum(C.qty(p))} ${esc(p.unit)}</span>${isDay(C.when(p)) ? `<span>${C.whenLabel} ${fmtDay(C.when(p))}</span>` : ''}${p.recetario_no ? `<span>Libro recetario nº ${esc(p.recetario_no)}</span>` : ''}${prodWarn(p) ? '<span class="warn">Pendiente</span>' : ''}</span></div></a></li>`).join('')}</ul><p class="none" data-none hidden>${C.none}</p>`
+    : empty(...C.empty);
+  return `<h2>${C.title}</h2><p class="hint intro">${C.intro}</p>
     ${items.length ? searchBox('Buscar lote, fórmula, recetario o fecha') : ''}${list}`;
 }
 
@@ -224,7 +242,7 @@ function qcRow(t = {}) {
 async function viewProduction(id) {
   const p = await getOne('production', id);
   if (!p) return empty('Este registro no existe.', '');
-  if (p.status === 'dispensada' && !p.deleted_at) state.parent = '#elaboraciones--dispensadas';
+  if (CLOSED[p.status] && !p.deleted_at) state.parent = `#elaboraciones--${CLOSED[p.status].route}`;
   if (p.deleted_at) {
     return `${deletedBanner('production', p)}<div class="panel">
       <div class="head-row"><h2 class="big">${esc(p.record_code)}</h2>${pill('production', p.status)}</div>
@@ -660,7 +678,7 @@ Object.assign(ACTIONS, {
   rejectProduction: async (el) => {
     const rec = await getOne('production', el.dataset.id);
     if (!rec || rec.status !== 'elaborada') return;
-    const ok = await ask({ title: 'Rechazar el preparado', message: `Se registrará el rechazo de ${rec.lot || rec.record_code} con fecha de hoy y a tu nombre. No se podrá dispensar. El stock consumido no se repone.`, confirmLabel: 'Rechazar', danger: true });
+    const ok = await ask({ title: 'Rechazar el preparado', message: `Se registrará el rechazo de ${rec.lot || rec.record_code} con fecha de hoy y a tu nombre. No se podrá dispensar y pasará al apartado «Rechazadas». El stock consumido no se repone.`, confirmLabel: 'Rechazar', danger: true });
     if (!ok) return;
     rec.status = 'rechazada';
     rec.status_changed_at = nowIso();
@@ -668,7 +686,7 @@ Object.assign(ACTIONS, {
     rec.decision_date = todayIso();
     rec.decision_by = state.profile.name;
     await save('production', rec, 'rechazar_elaboracion', rec.lot || rec.record_code);
-    toast('Preparado rechazado.');
+    toast('Preparado rechazado. Se guarda en «Rechazadas» y sale de la lista de Elaborar.');
     await route();
   },
   assignLot: async (el) => {

@@ -1,4 +1,4 @@
-# FARMA·LAB móvil v0.3.34 (prototipo)
+# FARMA·LAB móvil v0.3.35 (prototipo)
 
 App que se instala desde Chrome o Edge (Android y Windows) y funciona sin conexión. Los datos se guardan **en el propio dispositivo** y, si se configura, se sincronizan entre el móvil y el PC a través de Google Drive.
 
@@ -14,6 +14,9 @@ App que se instala desde Chrome o Edge (Android y Windows) y funciona sin conexi
 - **Temperaturas** (PN/L/PG/009/00): lectura diaria del local y la nevera, incidencias y registro mensual en PDF.
 - **Documentos**: PNT y bibliografía con su PDF, Word o foto, que se consultan dentro de la app, también sin conexión.
 - Registro de actividad, bloqueo con PIN, exportar e importar copias.
+
+## Novedades de la v0.3.35
+- **Preparados rechazados aparte.** Al rechazar un preparado, sale de la lista de Elaborar y se guarda en **«Rechazadas»** (botón bajo la lista, junto a «Dispensadas»), del más reciente al más antiguo, con la fecha del rechazo y buscador. Conserva su guía y su ficha de registro en PDF con la decisión; desde su ficha, «atrás» vuelve a «Rechazadas». La lista de Elaborar queda solo con lo abierto: en proceso y elaboradas pendientes de dispensar.
 
 ## Novedades de la v0.3.34
 - **Fórmulas dispensadas aparte.** Al marcar una elaboración como dispensada, sale de la lista de Elaborar y se guarda en **«Dispensadas»** (botón bajo la lista), de la más reciente a la más antigua, con su fecha de dispensación y nº de libro recetario, y con buscador. Conserva su guía, su etiqueta y su ficha de registro en PDF; desde su ficha, «atrás» vuelve a «Dispensadas».
