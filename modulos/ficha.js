@@ -41,6 +41,16 @@ async function viewRecordSheet(id) {
     <div id="sheetOut"></div>`;
 }
 
+/**
+ * «Nombre de la fórmula» de la ficha 2: el del código nacional elaborado (con su concentración y su peso o volumen)
+ * o, sin CN, la fórmula con la concentración y la cantidad total; detrás, la fórmula de la que sale y su versión.
+ */
+async function sheetName(p) {
+  const name = await producedName(p);
+  const fromFormula = squash(name).startsWith(squash(p.formula_name));
+  const ref = [!fromFormula && `fórmula «${p.formula_name}»`, p.formula_code, `versión ${p.formula_version || '1'}`].filter(Boolean).join(', ');
+  return `${name} (${ref})`;
+}
 /** Junta en un objeto todo lo que va en la ficha, a partir del registro de elaboración y del almacén. */
 async function recordSheetData(p, extra) {
   const mats = new Map((await getAll('material')).map((m) => [m.uuid, m]));
@@ -52,7 +62,7 @@ async function recordSheetData(p, extra) {
     ? `Aceptado el ${fmtDay(p.decision_date)} por ${p.decision_by || '—'}`
     : p.decision === 'rechazada' ? `Rechazado el ${fmtDay(p.decision_date)} por ${p.decision_by || '—'}` : 'Pendiente de decisión';
   return {
-    name: [p.formula_name, p.formula_code && `(${p.formula_code}, versión ${p.formula_version || '1'})`].filter(Boolean).join(' '),
+    name: await sheetName(p),
     type: FORMULA_TYPES[p.formula_type] || FORMULA_TYPES.fm,
     composition: `${ws.map((w) => `${w.ingredient} ${fmtNum(w.theoretical)} ${w.unit}`).join(' · ')} — para ${prodQty(p, false)}`,
     pnts: (p.pnt_refs || []).map((r) => `${r.code} · ${r.title} · versión ${r.version || '1'}`),

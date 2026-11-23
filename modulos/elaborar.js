@@ -111,6 +111,41 @@ const presentationUnit = (text) => (/\d\s*(ml|mililitros?)\b/i.test(String(text 
  * Peso o volumen total: la composición de la fórmula se lee como porcentajes (5 g en 100 = 5 %) y se aplica al total
  * que se elija, en g o en ml (5 % p/v de 60 ml = 3 g). Cada componente conserva la unidad con la que está escrito.
  */
+/*
+ * Nombre del código nacional elaborado, para la ficha de registro: el oficial si tiene precio tasado
+ * («ACEITE SALICÍLICO 1% 100 ML SOLUCIÓN»); si no, la fórmula con la concentración y la presentación del CN
+ * («Vaselina salicílica 2 % 50 g»), sin repetir lo que el nombre ya diga.
+ */
+const squash = (x) => fold(str(x)).replace(/[\s.,]+/g, '');
+/** ¿El texto ya dice esa parte? «2 %» está en «Vaselina salicílica 2 %», pero «1 %» no está en «… 11 %». */
+function hasPart(text, part) {
+  const h = squash(text); const n = squash(part);
+  if (!n) return true;
+  for (let i = h.indexOf(n); i >= 0; i = h.indexOf(n, i + 1)) {
+    const cutBefore = /^[0-9]/.test(n) && /[0-9]/.test(h[i - 1] || '');
+    const cutAfter = /[0-9]$/.test(n) && /[0-9]/.test(h[i + n.length] || '');
+    if (!cutBefore && !cutAfter) return true;
+  }
+  return false;
+}
+async function cnNameFor(cn, formulaName) {
+  if (!cn || !str(cn.cn)) return '';
+  const hit = await tasadoFor(cn.cn);
+  if (hit && str(hit.producto)) return str(hit.producto);
+  const base = str(formulaName);
+  const extra = [cn.concentration, cn.presentation].map((x) => str(x)).filter((x) => x && !hasPart(base, x));
+  return [base, ...extra].filter(Boolean).join(' ');
+}
+/** Nombre de lo elaborado: el del CN (guardado al elegirlo) o la fórmula con la concentración de sus activos y la cantidad total. */
+async function producedName(p) {
+  if (p.cn && str(p.cn.cn)) return str(p.cn.name) || cnNameFor(p.cn, p.formula_name);
+  const base = str(p.formula_name);
+  const conc = base.includes('%') || !['g', 'ml'].includes(p.unit) || !(p.target_amount > 0) ? [] : (p.weighings || [])
+    .filter((w) => w.role === 'activo' && PCT_FACTOR[w.unit] > 0 && isNum(w.theoretical))
+    .map((w) => `${w.ingredient} ${fmtNum(Math.round((w.theoretical * PCT_FACTOR[w.unit] / p.target_amount) * 100 * 1000) / 1000)} %`);
+  const qty = `${fmtNum(p.target_amount)} ${p.unit}`;
+  return `${base}${conc.length ? ` (${conc.join(', ')})` : ''} ${hasPart(base, qty) ? '' : qty}`.trim();
+}
 const UNIT_WORDS = { g: 'g (peso)', ml: 'ml (volumen)', unidades: 'unidades' };
 const unitChoices = (formulaUnit) => (['g', 'ml'].includes(formulaUnit) ? ['g', 'ml'] : [formulaUnit || 'g']);
 const PCT_FACTOR = { g: 1, mg: 0.001, ml: 1 };
@@ -278,7 +313,7 @@ async function viewProduction(id) {
       ['Tipo', esc(FORMULA_TYPES[p.formula_type] || FORMULA_TYPES.fm)],
       ['Forma y vía', `${val(p.form)}${p.route ? ` · ${esc(p.route)}` : ''}`],
       ['Cantidad', prodQty(p)],
-      p.cn ? ['Código nacional', `${esc(p.cn.cn)} (${esc([p.cn.presentation, p.cn.concentration].filter(Boolean).join(', '))})`] : null,
+      p.cn ? ['Código nacional', `${esc(p.cn.cn)} · ${esc(await producedName(p))}`] : null,
       tasado ? ['PVP tasado', `<strong>${money(tasado.pvp)}</strong>`] : null,
       !tasado && p.valuation ? ['Precio de valoración', `<strong>${money(p.valuation.total)}</strong> <span class="hint">(${fmtDay(p.valuation.date)})</span>`] : null,
       ['Elaborador', val(p.operator)],
@@ -544,7 +579,8 @@ Object.assign(FORMS, {
     const pnts = (await getLive('pnt')).filter((p) => (f.pnt_uuids || []).includes(p.uuid));
     const unit = unitChoices(f.unit).includes(d.unit) ? d.unit : f.unit;
     const factor = target / f.target_amount;   // cada componente conserva su porcentaje sobre el total, en g o en ml
-    const cn = d.cn !== undefined && d.cn !== '' ? (f.national_codes || [])[Number(d.cn)] || null : null;
+    const cnPick = d.cn !== undefined && d.cn !== '' ? (f.national_codes || [])[Number(d.cn)] || null : null;
+    const cn = cnPick ? { ...cnPick, name: await cnNameFor(cnPick, f.name) } : null;   // el nombre queda fijado al elaborarla
     const now = nowIso();
     const rec = {
       uuid: newId(), record_code: code.slice(0, 80), status: 'en_proceso', status_changed_at: now,
@@ -891,7 +927,7 @@ Object.assign(FORMS, {
     state.label = { blob, name };
     const changes = [];
     if (extra.recetario_no && !p.recetario_no) { p.recetario_no = extra.recetario_no; changes.push(`nº libro recetario ${p.recetario_no}`); }
-    if (extra.cn && !p.cn) { p.cn = { cn: extra.cn.cn, presentation: extra.cn.presentation || '', concentration: extra.cn.concentration || '' }; changes.push(`código nacional ${p.cn.cn}`); }
+    if (extra.cn && !p.cn) { p.cn = { cn: extra.cn.cn, presentation: extra.cn.presentation || '', concentration: extra.cn.concentration || '' }; p.cn.name = await cnNameFor(p.cn, p.formula_name); changes.push(`código nacional ${p.cn.cn}`); }
     if (changes.length) await save('production', p, 'actualizar_pesadas', `${p.lot}: ${changes.join(', ')}`);
     await logOnly('etiqueta_generada', `${p.lot} (${extra.copies} ${extra.copies === 1 ? 'copia' : 'copias'})`);
     const canShare = navigator.canShare && navigator.canShare({ files: [new File([blob], name, { type: 'application/pdf' })] });
