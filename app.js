@@ -6,7 +6,7 @@
  * sincronizarlo más adelante con la versión de PC.
  */
 
-const APP_VERSION = '0.3.37';
+const APP_VERSION = '0.3.38';
 const PREVIEW = document.documentElement.dataset.preview === '1'; // copia de prueba publicada en Claude
 const DB_NAME = 'farmalab-movil';
 const EXPORT_FORMAT = 'farmalab-datos';
@@ -497,7 +497,7 @@ const ICON = {
   ext: svg('<path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>'),
   sync: svg('<path d="M7 18.5H6.5a4 4 0 0 1-.6-7.96A5.5 5.5 0 0 1 16.6 9a3.75 3.75 0 0 1 .9 7.4"/><path d="M15 13.5l-3-3-3 3M12 10.5V20"/>'),
 };
-const TABS = [['#inicio', 'Inicio', ICON.home], ['#materias', 'Almacén', ICON.box], ['#formulas', 'Fórmulas', ICON.flask], ['#elaboraciones', 'Elaborar', ICON.scale], ['#temperaturas', 'Controles', ICON.gauge], ['#pnt', 'Documentos', ICON.doc]];
+const TABS = [['#inicio', 'Inicio', ICON.home], ['#indicemp', 'Almacén', ICON.box], ['#formulas', 'Fórmulas', ICON.flask], ['#elaboraciones', 'Elaborar', ICON.scale], ['#temperaturas', 'Controles', ICON.gauge], ['#pnt', 'Documentos', ICON.doc]];
 // Punto de aviso en una pestaña (p. ej. temperatura sin registrar hoy o fuera de rango), por su enlace.
 const TAB_BADGES = { '#temperaturas': 'tempBadge' };
 
@@ -910,7 +910,7 @@ async function renderRoute() {
   view.dataset.view = sec || 'inicio';
   view.dataset.depth = (!arg || ['archivo', 'dispensadas', 'rechazadas'].includes(arg)) ? 'root' : (extra === 'editar' || ['nueva', 'nuevo'].includes(arg)) ? 'form' : 'detail';
   $('#title').textContent = info.title;
-  const sub = Boolean(arg) || ['ajustes', 'auditoria', 'papelera', 'conservacion', 'sincronizacion', 'calculadora', 'valoracion', 'etiqueta', 'registromp', 'indicemp', 'farmaceuticos', 'registroac', 'registrotemp', 'registrobal', 'etiquetaestado'].includes(sec);
+  const sub = Boolean(arg) || ['ajustes', 'auditoria', 'papelera', 'conservacion', 'sincronizacion', 'calculadora', 'valoracion', 'etiqueta', 'registromp', 'farmaceuticos', 'registroac', 'registrotemp', 'registrobal', 'etiquetaestado'].includes(sec);
   $('#backBtn').hidden = !sub;
   $('#mark').hidden = sub;
   $$('.tabbar a').forEach((a, i) => {

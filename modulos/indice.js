@@ -90,8 +90,7 @@ function unindexed(subs, lots) {
 ROUTES.indicemp = (arg, extra) => (arg === 'nueva' ? viewSubstanceForm(null, extra) : arg && extra === 'editar' ? viewSubstanceForm(arg) : arg ? viewSubstance(arg) : viewSubstances());
 
 // ------------------------------------------------------------------ lista
-async function viewSubstances() {
-  state.parent = '#materias';
+async function viewSubstances() {   // portada del almacén (v0.3.38): sin botón atrás, como las demás pestañas
   const [subs, lots] = await Promise.all([getAll('substance'), getAll('material')]);
   const live = liveSubs(subs).sort((a, b) => a.number - b.number);
   const missing = unindexed(subs, lots);

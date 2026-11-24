@@ -1,4 +1,4 @@
-# FARMA·LAB móvil v0.3.37 (prototipo)
+# FARMA·LAB móvil v0.3.38 (prototipo)
 
 App que se instala desde Chrome o Edge (Android y Windows) y funciona sin conexión. Los datos se guardan **en el propio dispositivo** y, si se configura, se sincronizan entre el móvil y el PC a través de Google Drive.
 
@@ -14,6 +14,9 @@ App que se instala desde Chrome o Edge (Android y Windows) y funciona sin conexi
 - **Temperaturas** (PN/L/PG/009/00): lectura diaria del local y la nevera, incidencias y registro mensual en PDF.
 - **Documentos**: PNT y bibliografía con su PDF, Word o foto, que se consultan dentro de la app, también sin conexión.
 - Registro de actividad, bloqueo con PIN, exportar e importar copias.
+
+## Novedades de la v0.3.38
+- La pestaña Almacén del menú abre directamente el Índice de materias primas.
 
 ## Novedades de la v0.3.37
 - Almacén: las pestañas de arriba van en el orden Índice · Materias primas · Acondicionamiento.
