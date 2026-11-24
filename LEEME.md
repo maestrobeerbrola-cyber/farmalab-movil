@@ -1,4 +1,4 @@
-# FARMA·LAB móvil v0.3.36 (prototipo)
+# FARMA·LAB móvil v0.3.37 (prototipo)
 
 App que se instala desde Chrome o Edge (Android y Windows) y funciona sin conexión. Los datos se guardan **en el propio dispositivo** y, si se configura, se sincronizan entre el móvil y el PC a través de Google Drive.
 
@@ -14,6 +14,9 @@ App que se instala desde Chrome o Edge (Android y Windows) y funciona sin conexi
 - **Temperaturas** (PN/L/PG/009/00): lectura diaria del local y la nevera, incidencias y registro mensual en PDF.
 - **Documentos**: PNT y bibliografía con su PDF, Word o foto, que se consultan dentro de la app, también sin conexión.
 - Registro de actividad, bloqueo con PIN, exportar e importar copias.
+
+## Novedades de la v0.3.37
+- Almacén: las pestañas de arriba van en el orden Índice · Materias primas · Acondicionamiento.
 
 ## Novedades de la v0.3.36
 - **Ficha de registro con el nombre del código nacional.** En la ficha 2, «Nombre de la fórmula» lleva el nombre que corresponde al CN elaborado, con su concentración y su peso o volumen total: el oficial si el CN tiene precio tasado («ACEITE SALICÍLICO 1% 100 ML SOLUCIÓN») o, si no, el de la fórmula con la concentración y la presentación del CN («Vaselina salicílica 2 % 50 g»). Detrás, la fórmula de la que sale y su versión.
