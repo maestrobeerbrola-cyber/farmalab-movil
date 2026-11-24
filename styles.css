@@ -570,3 +570,12 @@ li.bad strong { color: var(--red); }
 
 /* Elaborar: aviso de dispensadas pendientes encima del botón «Dispensadas» */
 .msg.disp-pending { margin: 14px 0 12px; }
+
+/* Nueva elaboración: número de fórmulas iguales que se elaboran juntas */
+.stepper { display: grid; grid-template-columns: 48px 76px 48px; gap: 8px; align-items: center; justify-content: start; }
+.stepper input[type="text"] { text-align: center; font-weight: 600; font-variant-numeric: tabular-nums; }
+.stepper .step { display: grid; place-items: center; width: 48px; height: 48px; padding: 0; border: 1px solid #a9c6ba; border-radius: 10px; background: var(--surface); color: var(--green-ink); cursor: pointer; }
+.stepper .step:active { background: var(--green-bg); }
+.stepper .step:disabled { opacity: .35; cursor: default; }
+.stepper .step:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.total-line { margin: 0 0 10px; }

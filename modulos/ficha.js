@@ -19,7 +19,7 @@ async function viewRecordSheet(id) {
   const noPharmacy = !s.pharmacy.name;
   return `<div class="panel">
       <div class="head-row"><h2 class="big">${esc(p.lot)}</h2>${pill('production', p.status)}</div>
-      <p>${esc(p.formula_name)} · ${fmtNum(p.target_amount)} ${esc(p.unit)}</p>
+      <p>${esc(p.formula_name)} · ${prodQty(p)}</p>
     </div>
     ${missing.length
       ? `<div class="msg warn"><strong>Faltan datos:</strong> ${esc(missing.join(', '))}. Se puede generar como borrador; para la ficha definitiva, complétalos en la <a href="#elaboraciones--${esc(p.uuid)}">guía de elaboración</a>.</div>`
@@ -88,7 +88,7 @@ async function recordSheetData(p, extra) {
     qcBy: str(qc.by), qcApparatus: str(qc.apparatus), qcReagents: str(qc.reagents),
     recetario: str(p.recetario_no),
     dispensedDate: isDay(p.dispensed_date) && p.status === 'dispensada' ? fmtDay(p.dispensed_date) : '',
-    dispensedQty: isNum(p.dispensed_qty) && p.status === 'dispensada' ? `${fmtNum(p.dispensed_qty)} ${p.unit}` : '',
+    dispensedQty: isNum(p.dispensed_qty) && p.status === 'dispensada' ? amountText(p, p.dispensed_qty) : '',
     prescriber: [extra.prescriber, extra.collegiate && `nº col. ${extra.collegiate}`].filter(Boolean).join(' · '),
     patient: extra.patient,
     notes: str(p.notes),
@@ -119,7 +119,7 @@ async function buildRecordSheetPdf(p, d, s, draftMissing) {
     { h: 24, cells: [L(0, 0.18, 'Número de registro / lote'), V(0.18, 0.5, p.lot, { strong: true }), L(0.5, 0.68, 'Registro de elaboración'), V(0.68, 1, p.record_code)] },
     { h: 22, cells: [L(0, 0.18, po ? 'Nombre del preparado' : 'Nombre de la fórmula'), V(0.18, 1, d.name, { strong: true })] },
     { h: 18, cells: pair('Tipo', d.type, 'Forma farmacéutica', p.form) },
-    { h: 18, cells: pair('Vía de administración', p.route, 'Cantidad preparada', `${fmtNum(p.target_amount)} ${p.unit}`) },
+    { h: 18, cells: pair('Vía de administración', p.route, 'Cantidad preparada', prodQty(p, false)) },
     { h: 18, cells: pair('Fecha de elaboración', fmtDay(p.elaborated_date), 'Fecha de caducidad', fmtDay(p.expiry_date)) },
     { h: 18, cells: pair('Condiciones de conservación', p.storage, 'Código nacional', p.cn && p.cn.cn) },
   ], { gap: 7 });

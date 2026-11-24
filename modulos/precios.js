@@ -210,10 +210,12 @@ async function viewValuation(src, id) {
     state.parent = `#elaboraciones--${p.uuid}`;
     init = p.valuation && p.valuation.inputs
       ? p.valuation.inputs
-      : initFromRecipe(p.form, p.target_amount, p.unit, (p.weighings || []).filter((w) => w.role === 'activo').map((w) => ({ name: w.ingredient, amount: w.theoretical, unit: w.unit })));
-    origin = `<a href="#elaboraciones--${esc(p.uuid)}">${esc(p.lot || p.record_code)}</a> · ${esc(p.formula_name)} · ${fmtNum(p.target_amount)} ${esc(p.unit)}${p.form ? ` · ${esc(p.form)}` : ''}`;
+      // varias fórmulas iguales: se valora una (cada envase se factura aparte)
+      : initFromRecipe(p.form, eachAmount(p), p.unit, (p.weighings || []).filter((w) => w.role === 'activo').map((w) => ({ name: w.ingredient, amount: round6(w.theoretical / prodCount(p)), unit: w.unit })));
+    origin = `<a href="#elaboraciones--${esc(p.uuid)}">${esc(p.lot || p.record_code)}</a> · ${esc(p.formula_name)} · ${prodQty(p)}${p.form ? ` · ${esc(p.form)}` : ''}`;
     const hit = p.cn ? tasadoLookup(data, p.cn.cn) : null;
-    if (hit) notes.push(`<div class="msg ok">El CN ${esc(p.cn.cn)} tiene precio tasado: <strong>${money(hit.pvp)}</strong> (${esc(hit.producto)}). Se factura a ese precio, sin valorar.</div>`);
+    if (hit) notes.push(`<div class="msg ok">El CN ${esc(p.cn.cn)} tiene precio tasado: <strong>${money(hit.pvp)}</strong>${prodCount(p) > 1 ? ' cada fórmula' : ''} (${esc(hit.producto)}). Se factura a ese precio, sin valorar.</div>`);
+    else if (prodCount(p) > 1) notes.push(`<p class="msg ok">Son ${esc(splitText(p))}: aquí se valora una sola. En la elaboración se muestra también el precio de las ${prodCount(p)}.</p>`);
     if (p.valuation) notes.push(`<p class="hint">Valoración guardada el ${fmtDay(p.valuation.date)}: ${money(p.valuation.total)}${isNum(p.valuation.p_factor) && p.valuation.p_factor !== s.pricing.p_factor ? ` (con factor P ${fmtNum(p.valuation.p_factor)} €; ahora es ${fmtNum(s.pricing.p_factor)} €)` : ''}.</p>`);
     const of = officinalHit(p.formula_name);
     if (of) notes.push(`<div class="msg ok">${esc(of.name)}: precio fijo de ${money(of.upTo100)} hasta 100 ml y ${money(of.upTo250)} de 101 a 250 ml (IVA incluido).</div>`);

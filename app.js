@@ -6,7 +6,7 @@
  * sincronizarlo más adelante con la versión de PC.
  */
 
-const APP_VERSION = '0.3.38';
+const APP_VERSION = '0.3.39';
 const PREVIEW = document.documentElement.dataset.preview === '1'; // copia de prueba publicada en Claude
 const DB_NAME = 'farmalab-movil';
 const EXPORT_FORMAT = 'farmalab-datos';
@@ -486,6 +486,7 @@ const ICON = {
   sliders: svg('<path d="M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1"/><circle cx="15" cy="6" r="2"/><circle cx="9" cy="12" r="2"/><circle cx="17" cy="18" r="2"/>'),
   lock: svg('<rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/>'),
   plus: svg('<path d="M12 5v14M5 12h14"/>'),
+  minus: svg('<path d="M5 12h14"/>'),
   back: svg('<path d="M15 5l-7 7 7 7"/>'),
   x: svg('<path d="M6 6l12 12M18 6 6 18"/>'),
   calc: svg('<rect x="5" y="3" width="14" height="18" rx="2"/><path d="M8 7h8M8.5 11h.01M12 11h.01M15.5 11h.01M8.5 14.5h.01M12 14.5h.01M15.5 14.5h.01M8.5 18h.01M12 18h3.5"/>'),
@@ -1003,7 +1004,7 @@ async function viewHome() {
   }
   html += '<section><h2>En proceso</h2>';
   html += open.length
-    ? `<ul class="list">${open.map((p) => `<li><a class="row" href="#elaboraciones--${esc(p.uuid)}"><div class="row-main"><strong>${esc(p.record_code)}</strong><span class="sub"><span>${esc(p.formula_name)}</span><span>${fmtNum(p.target_amount)} ${esc(p.unit)}</span><span>${progressText(p)}</span></span></div></a></li>`).join('')}</ul>`
+    ? `<ul class="list">${open.map((p) => `<li><a class="row" href="#elaboraciones--${esc(p.uuid)}"><div class="row-main"><strong>${esc(p.record_code)}</strong><span class="sub"><span>${esc(p.formula_name)}</span><span>${esc(qtyShort(p))}</span><span>${progressText(p)}</span></span></div></a></li>`).join('')}</ul>`
     : `<div class="empty"><strong>No hay elaboraciones en proceso.</strong><a class="btn secondary small" href="#elaboraciones--nueva">Nueva elaboración</a></div>`;
   html += `</section><section><h2>Registros</h2><ul class="list counts">
     <li><a class="row" href="#materias"><span class="row-main">Materias primas en uso</span><b>${mats.filter((m) => !lotArchived(m)).length}</b></a></li>

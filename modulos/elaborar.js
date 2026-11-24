@@ -51,14 +51,14 @@ const STATUS_ORDER = { en_proceso: 0, elaborada: 1, dispensada: 2, rechazada: 3 
 const CLOSED = {
   dispensada: {
     route: 'dispensadas', title: 'Dispensadas', when: (p) => p.dispensed_date, whenLabel: 'Dispensada el',
-    qty: (p) => p.dispensed_qty ?? p.target_amount,
+    qty: (p) => (isNum(p.dispensed_qty) && round6(p.dispensed_qty) !== round6(p.target_amount) ? `${fmtNum(p.dispensed_qty)} ${p.unit}` : qtyShort(p)),
     intro: 'Fórmulas ya dispensadas, de la más reciente a la más antigua. No salen en la lista de Elaborar, pero conservan su guía, su etiqueta y su ficha de registro en PDF.',
     none: 'Ninguna fórmula dispensada coincide con la búsqueda.',
     empty: ['Aún no hay fórmulas dispensadas.', 'Al marcar una elaboración como dispensada, sale de la lista de Elaborar y se guarda aquí.'],
   },
   rechazada: {
     route: 'rechazadas', title: 'Rechazadas', when: (p) => p.decision_date || String(p.status_changed_at || '').slice(0, 10), whenLabel: 'Rechazada el',
-    qty: (p) => p.target_amount,
+    qty: (p) => qtyShort(p),
     intro: 'Preparados rechazados, del más reciente al más antiguo. No se pueden dispensar ni salen en la lista de Elaborar, pero conservan su guía y su ficha de registro en PDF con la decisión de rechazo.',
     none: 'Ningún preparado rechazado coincide con la búsqueda.',
     empty: ['No hay preparados rechazados.', 'Al rechazar un preparado, sale de la lista de Elaborar y se guarda aquí.'],
@@ -74,7 +74,7 @@ async function viewProductions() {
   const dispPending = live.filter((p) => p.status === 'dispensada' && prodWarn(p)).length;
   const trashed = all.length - live.length;
   const list = items.length
-    ? `<ul class="list" data-list>${items.map((p) => `<li data-text="${esc(prodText(p))}"><a class="row" href="#elaboraciones--${esc(p.uuid)}"><div class="row-main"><strong>${esc(p.lot || p.record_code)}</strong><span class="sub"><span>${esc(p.formula_name)}</span><span>${fmtNum(p.target_amount)} ${esc(p.unit)}</span><span>${esc(fmtStamp(p.created_at).slice(0, 10))}</span>${prodWarn(p) ? '<span class="warn">Pendiente</span>' : ''}</span></div>${pill('production', p.status)}</a></li>`).join('')}</ul><p class="none" data-none hidden>Ninguna elaboración coincide con la búsqueda.</p>`
+    ? `<ul class="list" data-list>${items.map((p) => `<li data-text="${esc(prodText(p))}"><a class="row" href="#elaboraciones--${esc(p.uuid)}"><div class="row-main"><strong>${esc(p.lot || p.record_code)}</strong><span class="sub"><span>${esc(p.formula_name)}</span><span>${esc(qtyShort(p))}</span><span>${esc(fmtStamp(p.created_at).slice(0, 10))}</span>${prodWarn(p) ? '<span class="warn">Pendiente</span>' : ''}</span></div>${pill('production', p.status)}</a></li>`).join('')}</ul><p class="none" data-none hidden>Ninguna elaboración coincide con la búsqueda.</p>`
     : closed.some(([, l]) => l.length)
       ? empty('No hay elaboraciones abiertas.', 'Las dispensadas y las rechazadas están en sus apartados, debajo.')
       : empty('Aún no hay elaboraciones.', 'Crea una con «Nueva elaboración» a partir de una fórmula aprobada.');
@@ -90,7 +90,7 @@ async function viewClosed(status) {
   const items = (await getAll('production')).filter((p) => !p.deleted_at && p.status === status)
     .sort((a, b) => (prodWarn(b) - prodWarn(a)) || String(C.when(b) || '').localeCompare(String(C.when(a) || '')) || String(b.created_at).localeCompare(String(a.created_at)));
   const list = items.length
-    ? `<ul class="list" data-list>${items.map((p) => `<li data-text="${esc(prodText(p))}"><a class="row" href="#elaboraciones--${esc(p.uuid)}"><div class="row-main"><strong>${esc(p.lot || p.record_code)}</strong><span class="sub"><span>${esc(p.formula_name)}</span><span>${fmtNum(C.qty(p))} ${esc(p.unit)}</span>${isDay(C.when(p)) ? `<span>${C.whenLabel} ${fmtDay(C.when(p))}</span>` : ''}${p.recetario_no ? `<span>Libro recetario nº ${esc(p.recetario_no)}</span>` : ''}${prodWarn(p) ? '<span class="warn">Pendiente</span>' : ''}</span></div></a></li>`).join('')}</ul><p class="none" data-none hidden>${C.none}</p>`
+    ? `<ul class="list" data-list>${items.map((p) => `<li data-text="${esc(prodText(p))}"><a class="row" href="#elaboraciones--${esc(p.uuid)}"><div class="row-main"><strong>${esc(p.lot || p.record_code)}</strong><span class="sub"><span>${esc(p.formula_name)}</span><span>${esc(C.qty(p))}</span>${isDay(C.when(p)) ? `<span>${C.whenLabel} ${fmtDay(C.when(p))}</span>` : ''}${p.recetario_no ? `<span>Libro recetario nº ${esc(p.recetario_no)}</span>` : ''}${prodWarn(p) ? '<span class="warn">Pendiente</span>' : ''}</span></div></a></li>`).join('')}</ul><p class="none" data-none hidden>${C.none}</p>`
     : empty(...C.empty);
   return `<h2>${C.title}</h2><p class="hint intro">${C.intro}</p>
     ${items.length ? searchBox('Buscar lote, fórmula, recetario o fecha') : ''}${list}`;
@@ -143,7 +143,7 @@ async function producedName(p) {
   const conc = base.includes('%') || !['g', 'ml'].includes(p.unit) || !(p.target_amount > 0) ? [] : (p.weighings || [])
     .filter((w) => w.role === 'activo' && PCT_FACTOR[w.unit] > 0 && isNum(w.theoretical))
     .map((w) => `${w.ingredient} ${fmtNum(Math.round((w.theoretical * PCT_FACTOR[w.unit] / p.target_amount) * 100 * 1000) / 1000)} %`);
-  const qty = `${fmtNum(p.target_amount)} ${p.unit}`;
+  const qty = `${fmtNum(eachAmount(p))} ${p.unit}`;   // el nombre es el de cada fórmula, aunque se elaboren varias
   return `${base}${conc.length ? ` (${conc.join(', ')})` : ''} ${hasPart(base, qty) ? '' : qty}`.trim();
 }
 const UNIT_WORDS = { g: 'g (peso)', ml: 'ml (volumen)', unidades: 'unidades' };
@@ -155,9 +155,23 @@ function compPct(c, f, totalUnit) {
   const pct = Math.round(((c.amount * PCT_FACTOR[c.unit]) / f.target_amount) * 100 * 1000) / 1000;
   return `${fmtNum(pct)} % ${c.unit === 'ml' ? 'v' : 'p'}/${totalUnit === 'ml' ? 'v' : 'p'}`;
 }
+/*
+ * Varias fórmulas iguales (si piden más de una): se elaboran juntas, en el mismo lote. target_amount es el total
+ * que se pesa, unit_amount la cantidad de cada fórmula y count cuántas son (sin count, una).
+ */
+const MAX_COUNT = 50;
+const prodCount = (p) => (Number.isInteger(p.count) && p.count > 1 ? p.count : 1);
+const eachAmount = (p) => (prodCount(p) > 1 ? (isNum(p.unit_amount) ? p.unit_amount : round6(p.target_amount / prodCount(p))) : p.target_amount);
+/** «3 × 30 g» en las listas; con una sola fórmula, «30 g». */
+const qtyShort = (p) => (prodCount(p) > 1 ? `${prodCount(p)} × ${fmtNum(eachAmount(p))} ${p.unit}` : `${fmtNum(p.target_amount)} ${p.unit}`);
+const splitText = (p) => (prodCount(p) > 1 ? `${prodCount(p)} fórmulas de ${fmtNum(eachAmount(p))} ${p.unit}` : '');
+/** «90 g (3 fórmulas de 30 g)»: una cantidad de la elaboración; el reparto solo si es el total. */
+const amountText = (p, amount) => `${fmtNum(amount)} ${p.unit}${prodCount(p) > 1 && round6(amount) === round6(p.target_amount) ? ` (${splitText(p)})` : ''}`;
+/** Precio de cada fórmula y el de todas: « cada una · 3 fórmulas: 36,90 €». */
+const eachPrice = (p, price) => (prodCount(p) > 1 && isNum(price) ? ` cada una · ${prodCount(p)} fórmulas: <strong>${money(round2(price * prodCount(p)))}</strong>` : '');
 /** «60 ml»: cantidad de una elaboración (las de la v0.3.30 con densidad muestran también su equivalencia). */
 const prodQty = (p, html = true) => {
-  const base = `${fmtNum(p.target_amount)} ${p.unit}`;
+  const base = amountText(p, p.target_amount);
   if (!isNum(p.density) || !isNum(p.formula_amount)) return html ? esc(base) : base;
   const eq = `${fmtNum(round2(p.formula_amount))} ${p.formula_unit} con densidad ${fmtNum(p.density)} g/ml`;
   return html ? `${esc(base)} <span class="hint">(${esc(eq)})</span>` : `${base} (${eq})`;
@@ -174,8 +188,17 @@ async function viewProductionNew(preselect) {
     ${formMsg()}
     ${field('Fórmula aprobada', `<select name="formula_uuid" required>${formulas.map((f) => `<option value="${esc(f.uuid)}"${f.uuid === preselect ? ' selected' : ''}>${esc(f.code ? `${f.code} ` : '')}${esc(f.name)} (v${esc(f.version)})</option>`).join('')}</select>`)}
     <div data-cn-box></div>
+    <div class="field">
+      <span id="countLabel">Número de fórmulas</span>
+      <div class="stepper">
+        <button type="button" class="step" data-act="countStep" data-step="-1" aria-label="Una fórmula menos">${ICON.minus}</button>
+        <input type="text" inputmode="numeric" name="count" value="1" maxlength="2" autocomplete="off" aria-labelledby="countLabel">
+        <button type="button" class="step" data-act="countStep" data-step="1" aria-label="Una fórmula más">${ICON.plus}</button>
+      </div>
+      <span class="hint">Si te piden más de una igual: se elaboran juntas, en el mismo lote, y las cantidades se multiplican.</span>
+    </div>
     <div class="grid2">
-      ${field('Cantidad total a elaborar', decimal('target_amount', 'required'))}
+      <label class="field"><span data-qty-label>Cantidad a elaborar</span>${decimal('target_amount', 'required')}</label>
       ${field('Unidad', '<select name="unit"></select>')}
     </div>
     <p class="hint" data-unit-hint></p>
@@ -196,7 +219,11 @@ function updatePreview(form) {
     sel.innerHTML = options(unitChoices(f.unit), f.unit, UNIT_WORDS);
   }
   const unit = sel.value;
-  $('[data-unit-hint]', form).textContent = unitChoices(f.unit).length > 1 ? 'Peso total (g) o volumen total (ml) de la fórmula terminada.' : '';
+  const count = countOf(form);
+  const many = count > 1;
+  $('[data-qty-label]', form).textContent = many ? 'Cantidad de cada fórmula' : 'Cantidad a elaborar';
+  $('[data-unit-hint]', form).textContent = unitChoices(f.unit).length > 1 ? (many ? 'Peso (g) o volumen (ml) de cada fórmula terminada.' : 'Peso total (g) o volumen total (ml) de la fórmula terminada.') : '';
+  $$('[data-act="countStep"]', form).forEach((b) => { b.disabled = Number(b.dataset.step) < 0 ? !(count > 1) : count !== null && count >= MAX_COUNT; });
   const cnBox = $('[data-cn-box]', form);
   if (cnBox && cnBox.dataset.formula !== f.uuid) {
     cnBox.dataset.formula = f.uuid;
@@ -205,16 +232,36 @@ function updatePreview(form) {
   }
   let target = null;
   try { target = parseNum(form.target_amount.value, 'Cantidad'); } catch { target = null; }
-  if (!target || target <= 0 || !(f.target_amount > 0)) {
-    box.innerHTML = '<p class="hint">Escribe la cantidad total para ver la de cada componente.</p>';
+  if (count === null) {
+    box.innerHTML = `<p class="hint">Escribe un número de fórmulas entre 1 y ${MAX_COUNT}.</p>`;
     return;
   }
-  const factor = target / f.target_amount;
-  box.innerHTML = `<ul class="list">${(f.components || []).map((c) => {
+  if (!target || target <= 0 || !(f.target_amount > 0)) {
+    box.innerHTML = `<p class="hint">Escribe la cantidad ${many ? 'de cada fórmula' : 'total'} para ver la de cada componente.</p>`;
+    return;
+  }
+  const total = round6(target * count);
+  const factor = total / f.target_amount;
+  box.innerHTML = `${many ? `<p class="total-line">Total a elaborar: <strong>${fmtNum(total)} ${esc(unit)}</strong> (${count} fórmulas de ${fmtNum(target)} ${esc(unit)}). Se pesa todo junto.</p>` : ''}<ul class="list">${(f.components || []).map((c) => {
     const pct = compPct(c, f, unit);
     return `<li><div class="row"><span class="row-main">${esc(c.ingredient)} ${compTags(c)}${pct ? `<span class="sub"><span>${esc(pct)}</span></span>` : ''}</span><b class="num">${fmtNum(round6(c.amount * factor))} ${esc(c.unit)}</b></div></li>`;
   }).join('')}</ul>`;
 }
+/** Número de fórmulas del formulario: vacío es una; null si no es un entero entre 1 y MAX_COUNT. */
+function countOf(form) {
+  const t = str(form.count && form.count.value);
+  if (!t) return 1;
+  if (!/^\d{1,2}$/.test(t)) return null;
+  const n = Number(t);
+  return n >= 1 && n <= MAX_COUNT ? n : null;
+}
+ACTIONS.countStep = (el) => {
+  const form = el.closest('form');
+  if (!form || !form.count) return;
+  const n = Math.min(MAX_COUNT, Math.max(1, (countOf(form) || 1) + Number(el.dataset.step)));
+  form.count.value = String(n);
+  form.count.dispatchEvent(new Event('input', { bubbles: true }));
+};
 INPUT_HOOKS.push((t) => { const f = t.closest('form[data-form="productionNew"]'); if (f) updatePreview(f); });
 CHANGE_HOOKS.push((t) => {
   const f = t.closest('form[data-form="productionNew"]');
@@ -261,7 +308,7 @@ function includedPackRows(p) {
     const checked = u ? true : !used.length && !declined;   // la primera vez se propone marcado
     return `<div class="incl-pack"><input type="hidden" name="pack_incl_shown" value="${i}">
       ${checkbox('pack_incl', `Envase de <strong>${esc(w.ingredient)}</strong>: ${esc(desc)}${w.material_lot ? ` <span class="code">lote ${esc(w.material_lot)}</span>` : ''}`, checked, `value="${i}"`)}
-      <label class="incl-qty"><input type="text" inputmode="numeric" name="pack_incl_qty_${i}" maxlength="4" value="${esc(u ? u.qty : 1)}" aria-label="Unidades del envase de ${esc(w.ingredient)}"><span>uds.</span></label>
+      <label class="incl-qty"><input type="text" inputmode="numeric" name="pack_incl_qty_${i}" maxlength="4" value="${esc(u ? u.qty : prodCount(p))}" aria-label="Unidades del envase de ${esc(w.ingredient)}"><span>uds.</span></label>
     </div>`;
   }).join('');
 }
@@ -314,8 +361,8 @@ async function viewProduction(id) {
       ['Forma y vía', `${val(p.form)}${p.route ? ` · ${esc(p.route)}` : ''}`],
       ['Cantidad', prodQty(p)],
       p.cn ? ['Código nacional', `${esc(p.cn.cn)} · ${esc(await producedName(p))}`] : null,
-      tasado ? ['PVP tasado', `<strong>${money(tasado.pvp)}</strong>`] : null,
-      !tasado && p.valuation ? ['Precio de valoración', `<strong>${money(p.valuation.total)}</strong> <span class="hint">(${fmtDay(p.valuation.date)})</span>`] : null,
+      tasado ? ['PVP tasado', `<strong>${money(tasado.pvp)}</strong>${eachPrice(p, tasado.pvp)}`] : null,
+      !tasado && p.valuation ? ['Precio de valoración', `<strong>${money(p.valuation.total)}</strong>${eachPrice(p, p.valuation.total)} <span class="hint">(${fmtDay(p.valuation.date)})</span>`] : null,
       ['Elaborador', val(p.operator)],
       ['Inicio', esc(fmtStamp(p.created_at))],
       p.status === 'dispensada' ? ['Dispensada', `${fmtDay(p.dispensed_date)} · Libro recetario nº ${val(p.recetario_no)}`] : null,
@@ -353,9 +400,9 @@ async function viewProduction(id) {
   const inclRows = editableGuide ? includedPackRows(p) : '';
   const packSection = editableGuide
     ? `${inclRows ? `<div class="panel incl-packs" data-incl-pack>${inclRows}<p class="hint">Este envase no se descuenta aparte: va con la materia prima. Si además usas otro envase o una caja, añádelo abajo.</p></div>` : ''}
-       <div data-rows="pack">${(regularPacks.length ? regularPacks : [{}]).map((u) => packRow(u)).join('')}</div>
+       <div data-rows="pack">${(regularPacks.length ? regularPacks : [{ qty: prodCount(p) }]).map((u) => packRow(u)).join('')}</div>
        <button type="button" class="btn secondary small" data-act="addRow" data-kind="pack">${ICON.plus}Añadir envase</button>
-       <p class="hint">${open ? 'Se descuenta del stock al marcarla como elaborada.' : 'Al guardar la guía se descuenta del stock lo que añadas (y se repone lo que quites).'}</p>`
+       <p class="hint">${prodCount(p) > 1 ? `Son ${prodCount(p)} fórmulas: cuenta los envases de todas. ` : ''}${open ? 'Se descuenta del stock al marcarla como elaborada.' : 'Al guardar la guía se descuenta del stock lo que añadas (y se repone lo que quites).'}</p>`
     : (packUsed.length ? `<ul class="list">${packUsed.map((u) => `<li><div class="row"><span class="row-main">${esc(u.name)}${u.lot ? ` <span class="code">lote ${esc(u.lot)}</span>` : ''}</span><b class="num">${fmtNum(u.qty)} uds.</b></div></li>`).join('')}</ul>` : '<p class="hint none-docs">Sin material de acondicionamiento registrado.</p>');
 
   const pnts = p.pnt_refs || [];
@@ -405,7 +452,7 @@ async function viewProduction(id) {
         ${field('Nº libro recetario', text('recetario_no', `value="${esc(p.recetario_no || '')}" maxlength="40"`))}
         ${field('Fecha de dispensación', dateInput('dispensed_date', p.dispensed_date || (p.status === 'elaborada' ? todayIso() : '')))}
       </div>
-      ${field(`Cantidad dispensada (${esc(p.unit)})`, decimal('dispensed_qty', `value="${esc(inputNum(p.dispensed_qty ?? p.target_amount))}"`))}
+      ${field(`Cantidad dispensada (${esc(p.unit)})`, decimal('dispensed_qty', `value="${esc(inputNum(p.dispensed_qty ?? p.target_amount))}"`), prodCount(p) > 1 ? `Total de las ${esc(splitText(p))}.` : '')}
       <p class="hint">El paciente y el prescriptor constan en el libro recetario; en la app solo se escriben al imprimir la etiqueta y no se guardan.</p>
     </div></section>` : ''}
     ${field('Observaciones', `<textarea name="notes" maxlength="4000">${esc(p.notes || '')}</textarea>`)}
@@ -572,9 +619,12 @@ Object.assign(FORMS, {
     if (!code) throw new InputError('Escribe el código de registro.');
     const f = await getOne('formula', d.formula_uuid);
     if (!f || f.deleted_at || f.status !== 'aprobada') throw new InputError('Elige una fórmula aprobada.');
-    const target = parseNum(d.target_amount, 'Cantidad a elaborar');
-    if (!target || target <= 0) throw new InputError('La cantidad debe ser mayor que cero.');
+    const count = intOrNull(d.count, 'Número de fórmulas') ?? 1;
+    if (count < 1 || count > MAX_COUNT) throw new InputError(`El número de fórmulas debe estar entre 1 y ${MAX_COUNT}.`);
+    const each = parseNum(d.target_amount, count > 1 ? 'Cantidad de cada fórmula' : 'Cantidad a elaborar');   // la casilla es la de cada fórmula
+    if (!each || each <= 0) throw new InputError('La cantidad debe ser mayor que cero.');
     if (!(f.target_amount > 0)) throw new InputError('La fórmula no tiene un lote de referencia válido.');
+    const target = round6(each * count);
     if ((await getAll('production')).some((p) => lc(p.record_code) === lc(code))) throw new InputError('Ya existe un registro de elaboración con ese código.');
     const pnts = (await getLive('pnt')).filter((p) => (f.pnt_uuids || []).includes(p.uuid));
     const unit = unitChoices(f.unit).includes(d.unit) ? d.unit : f.unit;
@@ -587,14 +637,14 @@ Object.assign(FORMS, {
       formula_uuid: f.uuid, formula_code: f.code, formula_name: f.name, formula_version: f.version, formula_type: f.type || 'fm',
       form: f.form || '', route: f.route || '', storage: f.storage || '', validity_days: isNum(f.validity_days) ? f.validity_days : null,
       pnt_refs: pnts.map((p) => ({ uuid: p.uuid, code: p.code, title: p.title, version: p.version })), cn,
-      target_amount: target, unit, operator: state.profile.name, notes: str(d.notes),
+      target_amount: target, unit_amount: each, count, unit, operator: state.profile.name, notes: str(d.notes),
       weighings: (f.components || []).map((c) => ({
         uuid: newId(), ingredient: c.ingredient, role: c.role || 'excipiente', edo: isEdo(c), theoretical: round6(c.amount * factor), actual: null, unit: c.unit, material_lot: '',
       })),
       packaging_used: [], equipment: [], qc: { tests: [] }, decision: null,
     };
-    await save('production', rec, 'crear_registro_elaboracion', `${rec.record_code} ${rec.formula_name}`);
-    toast('Elaboración en proceso. Completa las pesadas y los lotes.');
+    await save('production', rec, 'crear_registro_elaboracion', `${rec.record_code} ${rec.formula_name}${count > 1 ? ` (${splitText(rec)})` : ''}`);
+    toast(count > 1 ? `Elaboración en proceso: ${count} fórmulas en el mismo lote. Completa las pesadas y los lotes.` : 'Elaboración en proceso. Completa las pesadas y los lotes.');
     location.hash = `#elaboraciones--${rec.uuid}`;
   },
 
@@ -781,10 +831,12 @@ async function viewLabel(id) {
   if (!isDay(p.expiry_date)) warn.push('la fecha de caducidad');
   if (!str(p.storage)) warn.push('las condiciones de conservación');
   if (!str(p.route)) warn.push('la vía de administración');
-  const copiesMax = s.label.layout === '2' ? 2 : 8;
+  const n = prodCount(p);
+  const perPage = s.label.layout === '2' ? 2 : 8;
+  const copiesMax = Math.max(perPage, n);   // una etiqueta por envase: varias fórmulas pueden necesitar más de un folio
   const cns = await labelCns(p);
   // por defecto, el CN de la elaboración; si no tiene, el de la presentación con la misma cantidad
-  const guess = p.cn ? p.cn.cn : ((cns.find((c) => presentationAmount(c.presentation) === p.target_amount) || {}).cn || '');
+  const guess = p.cn ? p.cn.cn : ((cns.find((c) => presentationAmount(c.presentation) === eachAmount(p)) || {}).cn || '');
   const cnField = cns.length
     ? field('Código nacional', `<select name="cn"><option value="">Sin código nacional</option>${cns.map((c) => `<option value="${esc(c.cn)}"${c.cn === guess ? ' selected' : ''}>${esc(`${c.cn}${[c.presentation, c.concentration].filter(Boolean).length ? ` · ${[c.presentation, c.concentration].filter(Boolean).join(', ')}` : ''}`)}</option>`).join('')}</select>`,
       p.cn ? '' : 'Si eliges uno, se guarda también en la elaboración.')
@@ -792,7 +844,7 @@ async function viewLabel(id) {
   if (!guess) warn.push('el código nacional (si la fórmula lo tiene)');
   return `<div class="panel">
       <div class="head-row"><h2 class="big">${esc(p.lot)}</h2>${pill('production', p.status)}</div>
-      <p>${esc(p.formula_name)} · ${fmtNum(p.target_amount)} ${esc(p.unit)}</p>
+      <p>${esc(p.formula_name)} · ${prodQty(p)}</p>
     </div>
     ${warn.length ? `<p class="msg warn">Falta ${esc(warn.join(', '))}. La etiqueta se puede generar, pero quedará incompleta.</p>` : ''}
     <form class="form" data-form="label" data-id="${esc(p.uuid)}" novalidate autocomplete="off">
@@ -805,9 +857,9 @@ async function viewLabel(id) {
       </div>
       <div class="grid2">
         ${field('Nº libro recetario', text('recetario_no', `value="${esc(p.recetario_no || '')}" maxlength="40"`))}
-        ${field(`Cantidad (${esc(p.unit)})`, decimal('qty', `value="${esc(inputNum(p.dispensed_qty ?? p.target_amount))}"`))}
+        ${field(n > 1 ? `Cantidad de cada envase (${esc(p.unit)})` : `Cantidad (${esc(p.unit)})`, decimal('qty', `value="${esc(inputNum(n > 1 ? eachAmount(p) : p.dispensed_qty ?? p.target_amount))}"`))}
       </div>
-      ${field('Copias', `<select name="copies">${Array.from({ length: copiesMax }, (_, i) => i + 1).map((n) => `<option value="${n}"${n === 1 ? ' selected' : ''}>${n}</option>`).join('')}</select>`, `Folio A4 con ${s.label.layout === '2' ? '2 etiquetas grandes' : '8 etiquetas'} para recortar. Se cambia en Ajustes.`)}
+      ${field('Copias', `<select name="copies">${Array.from({ length: copiesMax }, (_, i) => i + 1).map((k) => `<option value="${k}"${k === n ? ' selected' : ''}>${k}</option>`).join('')}</select>`, `${n > 1 ? `Son ${n} fórmulas: una etiqueta para cada envase${n > perPage ? `, en ${Math.ceil(n / perPage)} folios` : ''}. ` : ''}Folio A4 con ${s.label.layout === '2' ? '2 etiquetas grandes' : '8 etiquetas'} para recortar. Se cambia en Ajustes.`)}
       <p class="hint">El paciente, el prescriptor y su nº de colegiado solo se usan para esta etiqueta: no se guardan en la app ni en las copias de seguridad.</p>
       <button class="btn block" type="submit">Generar etiqueta</button>
     </form>
@@ -831,7 +883,6 @@ async function buildLabelPdf(p, extra, s) {
   const clean = (t) => [...String(t ?? '').replace(/\s+/g, ' ')].map((ch) => (charset.has(ch.codePointAt(0)) ? ch : '?')).join('').trim();
   const mm = (v) => (v * 72) / 25.4;
   const L = LAYOUTS[s.label.layout] || LAYOUTS[8];
-  const page = doc.addPage([mm(210), mm(297)]);
   const mx = (210 - (L.cols * L.w + (L.cols - 1) * L.gx)) / 2;
   const my = (297 - (L.rows * L.h + (L.rows - 1) * L.gy)) / 2;
 
@@ -886,9 +937,13 @@ async function buildLabelPdf(p, extra, s) {
     if (h <= boxH) break;
   }
   const dash = { thickness: 0.5, color: rgb(0.55, 0.55, 0.55), dashArray: [3, 3] };
-  const copies = Math.min(extra.copies, L.cols * L.rows);
+  const perPage = L.cols * L.rows;
+  const copies = Math.max(1, Math.min(extra.copies, Math.max(perPage, MAX_COUNT)));   // pasado un folio, sigue en otro
+  let page = null;
   for (let i = 0; i < copies; i += 1) {
-    const col = i % L.cols; const row = Math.floor(i / L.cols);
+    const k = i % perPage;
+    if (k === 0) page = doc.addPage([mm(210), mm(297)]);
+    const col = k % L.cols; const row = Math.floor(k / L.cols);
     const x0 = mm(mx + col * (L.w + L.gx));
     const yTop = mm(297 - my - row * (L.h + L.gy));
     const x1 = x0 + mm(L.w); const yBot = yTop - mm(L.h);
