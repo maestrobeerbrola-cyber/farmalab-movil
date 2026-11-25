@@ -326,8 +326,9 @@ input[type="text"].display-input:focus { outline: none; border: 0; }
 .seg { display: flex; gap: 4px; margin: 0 0 14px; padding: 4px; background: var(--gray-bg); border-radius: 12px; }
 .seg a { flex: 1; padding: 9px 8px; border-radius: 9px; color: var(--muted); font-size: 15px; font-weight: 600; text-align: center; text-decoration: none; }
 .seg a[aria-current="page"] { background: var(--surface); color: var(--green-ink); box-shadow: 0 1px 2px rgba(20, 40, 60, .12); }
-.seg + .search { margin-top: -6px; }
-.msg + .search { margin-top: 0; }   /* un aviso encima: la barra de búsqueda no lo tapa */
+.seg + .search { margin-top: -6px; }   /* tras las pestañas, 8 px de separación */
+/* La barra de búsqueda solo sube sobre el margen de main cuando va la primera: detrás de un texto, un aviso o un panel, no los tapa */
+main * + .search { margin-top: 0; }
 
 .tabbar .ind { position: relative; }
 .badge { position: absolute; top: -4px; right: 6px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 9px; background: var(--red); color: #fff; font-size: 11px; font-weight: 700; line-height: 18px; text-align: center; }

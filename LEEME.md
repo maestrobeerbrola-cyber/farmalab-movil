@@ -1,4 +1,4 @@
-# FARMA·LAB móvil v0.3.39 (prototipo)
+# FARMA·LAB móvil v0.3.40 (prototipo)
 
 App que se instala desde Chrome o Edge (Android y Windows) y funciona sin conexión. Los datos se guardan **en el propio dispositivo** y, si se configura, se sincronizan entre el móvil y el PC a través de Google Drive.
 
@@ -14,6 +14,10 @@ App que se instala desde Chrome o Edge (Android y Windows) y funciona sin conexi
 - **Temperaturas** (PN/L/PG/009/00): lectura diaria del local y la nevera, incidencias y registro mensual en PDF.
 - **Documentos**: PNT y bibliografía con su PDF, Word o foto, que se consultan dentro de la app, también sin conexión.
 - Registro de actividad, bloqueo con PIN, exportar e importar copias.
+
+## Novedades de la v0.3.40
+- Almacén → Índice: fuera el texto de debajo de las pestañas, que la barra de búsqueda tapaba.
+- La barra de búsqueda ya no tapa el texto o el aviso que tenga encima (archivo de lotes, Dispensadas, Rechazadas, precios tasados).
 
 ## Novedades de la v0.3.39
 - **Varias fórmulas iguales a la vez.** Al empezar una elaboración se elige el **número de fórmulas** (con − y +, hasta 50) por si piden más de una. Se elaboran juntas, en el mismo lote: la cantidad que se escribe es la de cada fórmula y las cantidades teóricas de las pesadas son las del total («Total a elaborar: 90 g, 3 fórmulas de 30 g»).

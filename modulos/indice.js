@@ -106,7 +106,6 @@ async function viewSubstances() {   // portada del almacén (v0.3.38): sin botó
       ${auto.length ? `<button class="btn secondary small" type="button" data-act="indexFromLots">Añadir ${auto.length === 1 ? `${esc(auto[0].name)} con el ${auto[0].inferred}` : `las ${auto.length} que ya tienen nº en sus lotes`}</button>` : ''}
     </div>` : '';
   return `${segmented(STORE_TABS, '#indicemp')}
-    <p class="hint intro">Cada materia prima tiene su nº. Cada envase que se recibe toma el siguiente: 109.1, 109.2, 109.3… Se asigna solo al registrar la recepción.</p>
     ${pending}
     ${live.length > 6 ? searchBox('Buscar nº o nombre') : ''}
     ${live.length
